@@ -11,15 +11,8 @@ from __future__ import annotations
 import logging
 import sys
 
-_WIDTH = 120
-
-
-def setup_logging(width: int = _WIDTH) -> logging.Logger:
-    """配置 root logger，返回名为 wereadit 的 logger。
-
-    refresh_print 的「行内刷新」功能改为可选：
-    若需要保留原视觉行为，可调用 get_refresh_print()。
-    """
+def setup_logging() -> logging.Logger:
+    """配置 root logger，返回名为 wereadit 的 logger。"""
     root = logging.getLogger()
     root.handlers.clear()
     root.setLevel(logging.INFO)
@@ -33,11 +26,10 @@ def setup_logging(width: int = _WIDTH) -> logging.Logger:
     return logging.getLogger("wereadit")
 
 
-def make_refresh_print(width: int = _WIDTH):
+def make_refresh_print():
     """返回一个 refresh_print 函数，用于行内刷新输出。
 
-    保留原 log_utils.py 的视觉行为：用 \\r 覆盖当前行，
-    logging 输出时先 clear 当前行避免错位。
+    用 ANSI 转义 \\033[K 清除到行尾，避免固定宽度填充在窄终端换行。
     """
 
     state = {"active": False}
@@ -45,12 +37,12 @@ def make_refresh_print(width: int = _WIDTH):
     def clear() -> None:
         if not state["active"]:
             return
-        print("\r" + " " * width + "\r", end="", flush=True)
+        print("\r\033[K", end="", flush=True)
         state["active"] = False
 
     def refresh_print(message: str) -> None:
         state["active"] = True
-        print(f"\r{message:<{width}}", end="", flush=True)
+        print(f"\r{message}\033[K", end="", flush=True)
 
     # 让 logging 输出前先 clear，避免行内刷新与日志互相覆盖
     class _RefreshSafeHandler(logging.Handler):

@@ -138,11 +138,6 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
                 last_time = this_time
                 index += 1
                 time.sleep(READ_INTERVAL_SECONDS)
-                if refresh_print:
-                    refresh_print(
-                        f"阅读进度: 第 {min(index, total + 1) - 1}/{total} 次，"
-                        f"已完成 {(index - 1) * 0.5:.1f} 分钟"
-                    )
             else:
                 logger.warning("无 synckey，尝试修复...")
                 fix_no_synckey(client, cfg)
