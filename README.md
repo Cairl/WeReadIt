@@ -34,7 +34,7 @@
 
 **Secrets（推送渠道，按需选一个配置即可）**
 
-推送渠道采用自动检测机制：配置哪个渠道的 token，就自动激活该渠道。无需额外设置 `PUSH_METHOD`。
+推送渠道采用自动检测机制：配置哪个渠道的 token，就自动激活该渠道。
 
 | key | 适用渠道 | 获取地址 |
 | --- | --- | --- |
@@ -50,16 +50,16 @@
 | key | 默认值 | 说明 |
 | --- | --- | --- |
 | `READ_NUM` | `120` | 阅读次数（每次 30 秒，120 次 = 60 分钟） |
-| `WEREAD_PLATFORM` | `android` | 兑换平台：`android` / `ios` |
 | `EXCHANGE_AWARD` | `2,2,2,2,2,2,2,2` | 兑换策略，8 位逗号分隔，`0`=不兑/`1`=体验卡/`2`=书币 |
 
 **Secrets（兑换功能，可选）**
 
+按需选一个配置即可：
+
 | key | 说明 |
 | --- | --- |
-| `WEREAD_ACCESS_TOKEN` | APP 端认证 token，未配置则跳过兑换。Android 填 `accessToken`，iOS 填 `skey` |
-
-> iOS 用户建议设置 `WEREAD_PLATFORM=ios`，否则领取的书币无法在 iOS APP 使用。
+| `WEREAD_ANDROID_TOKEN` | Android 端 `accessToken` |
+| `WEREAD_IOS_TOKEN` | iOS 端 `skey` |
 
 ### 3. 运行
 
@@ -74,7 +74,7 @@
 3. 打开微信读书 APP 正常使用
 4. 在抓包工具里按域名 `i.weread.qq.com` 筛选任意请求
 5. Android 查看请求头 `accessToken`，iOS 查看 `skey`
-6. 配置到 Secret `WEREAD_ACCESS_TOKEN`，并在 Variables 设置 `WEREAD_PLATFORM`
+6. Android 配置到 `WEREAD_ANDROID_TOKEN`，iOS 配置到 `WEREAD_IOS_TOKEN`
 
 token 有有效期（实测数天），过期后兑换功能会推送「登录超时」通知，重新抓包即可。`vid` 无需单独配置，脚本会从网页 cookie 的 `wr_vid` 自动提取。
 

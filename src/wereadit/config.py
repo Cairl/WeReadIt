@@ -23,6 +23,7 @@ from wereadit.constants import (
     DEFAULT_HEADERS,
     DEFAULT_READ_NUM,
     PLATFORM_ANDROID,
+    PLATFORM_IOS,
 )
 from wereadit.infra.curl_parser import parse_curl
 
@@ -63,9 +64,9 @@ class Config:
     serverchan_spt: str = ""
 
     # 兑换参数
-    weread_access_token: str = ""
     exchange_award: str = DEFAULT_EXCHANGE_AWARD
-    weread_platform: str = PLATFORM_ANDROID
+    weread_android_token: str = ""
+    weread_ios_token: str = ""
 
     # HTTP 请求参数
     headers: dict[str, str] = field(default_factory=dict)
@@ -100,6 +101,20 @@ class Config:
             return "serverchan"
         return ""
 
+    @property
+    def weread_access_token(self) -> str:
+        if self.weread_android_token:
+            return self.weread_android_token
+        return self.weread_ios_token
+
+    @property
+    def weread_platform(self) -> str:
+        if self.weread_android_token:
+            return PLATFORM_ANDROID
+        if self.weread_ios_token:
+            return PLATFORM_IOS
+        return PLATFORM_ANDROID
+
 
 def load_config() -> Config:
     """从环境变量加载配置。
@@ -130,9 +145,9 @@ def load_config() -> Config:
         telegram_bot_token=_env("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=_env("TELEGRAM_CHAT_ID"),
         serverchan_spt=_env("SERVERCHAN_SPT"),
-        weread_access_token=_env("WEREAD_ACCESS_TOKEN"),
+        weread_android_token=_env("WEREAD_ANDROID_TOKEN"),
+        weread_ios_token=_env("WEREAD_IOS_TOKEN"),
         exchange_award=_env("EXCHANGE_AWARD", DEFAULT_EXCHANGE_AWARD),
-        weread_platform=_env("WEREAD_PLATFORM", PLATFORM_ANDROID),
         headers=headers,
         cookies=cookies,
         curl_bash=curl_bash,
