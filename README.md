@@ -134,6 +134,10 @@ ruff check src/ tests/        # 代码风格检查
 - Cookie 失效后脚本会自动刷新，刷新失败会推送通知
 - 推送失败有 5 次重试，间隔 3-6 分钟随机
 
+## 致谢
+
+项目灵感及部分代码来自 [findmover/wxread](https://github.com/findmover/wxread)，感谢技术支持。
+
 ## 许可
 
 仅供学习交流使用，请勿用于商业用途。

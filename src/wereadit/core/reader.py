@@ -106,7 +106,7 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
     index = 1
     last_time = int(time.time()) - SECONDS_PER_READ
     total = cfg.read_num
-    logger.info("一共需要阅读 %d 次。", total)
+    logger.info("需要阅读 %d 次。", total)
 
     while index <= total:
         data.pop("s", None)
