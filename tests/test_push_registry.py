@@ -7,26 +7,28 @@ from unittest.mock import MagicMock
 import pytest
 
 from wereadit.config import Config
-from wereadit.constants import PLATFORM_ANDROID
 from wereadit.push.base import Pusher
 from wereadit.push.registry import _PUSHERS, get_pusher, push
 
 
 def _make_cfg(**overrides) -> Config:
-    """构造测试用 Config。"""
+    """构造测试用 Config。
+
+    push_method / weread_access_token / weread_platform 是 @property，
+    不能作为构造参数，由对应 token 字段自动派生。
+    """
     defaults = dict(
         read_num=2,
         books=["b1"],
         chapters=["c1"],
-        push_method="",
         pushplus_token="",
         wxpusher_spt="",
         telegram_bot_token="",
         telegram_chat_id="",
         serverchan_spt="",
-        weread_access_token="",
+        weread_android_token="",
+        weread_ios_token="",
         exchange_award="2,2,2,2,2,2,2,2",
-        weread_platform=PLATFORM_ANDROID,
         headers={},
         cookies={},
         curl_bash="",

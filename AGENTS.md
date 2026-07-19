@@ -25,10 +25,10 @@ python -m wereadit   # 模块方式运行
 ## Testing Instructions
 
 ```bash
-pytest tests/                     # 全部单元测试
-pytest tests/ -v                  # 详细输出
-pytest tests/test_config.py -v    # 单文件
-ruff check src/ tests/            # 代码检查
+pytest tests/                          # 全部单元测试
+pytest tests/ -v                       # 详细输出
+pytest tests/test_keepalive.py -v      # 保活策略回归测试
+ruff check src/ tests/                 # 代码检查
 ```
 
 ## Code Style
@@ -44,12 +44,12 @@ ruff check src/ tests/            # 代码检查
 src/wereadit/
 ├── app.py          # 编排入口：阅读 -> 兑换 -> 推送
 ├── config.py       # Config frozen dataclass + property 自动检测
-├── constants.py    # URL、加密盐、默认值、平台常量
+├── constants.py    # URL、加密盐、默认值、平台常量（带【保活策略】注释）
 ├── core/
-│   ├── reader.py   # 阅读循环 + Cookie 刷新
+│   ├── reader.py   # 阅读循环 + Cookie 刷新 + 熔断 + fix 后重试
 │   └── exchanger.py # 奖励兑换
 ├── infra/
-│   ├── http.py     # HttpClient（requests.Session 封装）
+│   ├── http.py     # HttpClient（Session 复用 TCP，cookies 业务层独占）
 │   └── curl_parser.py # cURL 命令解析
 ├── push/           # 推送渠道（策略模式 + @register 注册表）
 │   ├── base.py
@@ -65,8 +65,23 @@ src/wereadit/
 
 - **Config 是 frozen dataclass**：加载后不可变，推送渠道和兑换平台通过 `@property` 自动检测已配置的 token，无需显式指定 method/platform 字段。
 - **推送注册表**：`push/registry.py` 用装饰器注册代替 if-elif 链。
-- **Cookie 刷新**：失效后自动调 `login/renewal` 接口刷新，最多尝试 3 种 payload 变体。
+- **Cookie 刷新**：失效后自动调 `login/renewal` 接口刷新，3 种 payload 变体 + 多轮重试 + 指数退避，提高网络抖动下的恢复能力。
+- **熔断机制**：连续 `MAX_NO_SYNCKEY=5` 次无 synckey 抛 `ReadFailedError`，连续 `MAX_COOKIE_FAIL=3` 次 cookie 失败抛 `CookieExpiredError`，避免死循环卡死 GitHub Actions。app.py 捕获后推送告警。
+- **fix 后重试 read**：`fix_no_synckey` 后立即重试一次 read（重新签名），成功则计入本次进度，不丢失阅读请求。
+- **HttpClient cookies 业务层独占**：`Session` 仅用于 TCP 复用，cookies 存在 `self._cookies` 字典，每次请求显式传 `cookies=`，避免服务器 `Set-Cookie` 自动覆盖业务层 `wr_skey[:8]` 截断。
 - **兑换重试**：指数退避，最多 3 次，token 过期会抛出 `CookieExpiredError` 并推送通知。
+
+## Keepalive Strategy
+
+本项目基于 wxread 重构，**完整保留了 21 项保活策略**。修改任何保活相关代码前必读：
+
+- `wxread_keepalive_analysis.md` — 13 类保活策略深度分析
+- `wxread_keepalive_improvement_plan.md` — 改进计划与实施记录
+- `tests/test_keepalive.py` — 35 个保活策略回归测试（修改后必跑）
+
+**绝对不要删除的代码**（即使看起来无业务意义）：启动强制 `refresh_cookie`、3 种 `COOKIE_DATA_VARIANTS`、`fix_no_synckey`、`FIX_SYNCKEY_BOOK_IDS=["3300060341"]`、`last_time = now - 30`、`data.pop("s")`、`DEFAULT_READ_DATA` 固定字段、`time.sleep(30)`、`baggage` Sentry 头、`keepalive-job`、DNS `8.8.8.8`、`cal_hash`/`encode_data` 算法。
+
+修改前先问："这个改动会不会影响 wr_skey 续期 / synckey 同步 / 上下文重建 / 风控规避？" 如果答案是"可能"，就不要改。
 
 ## CI/CD
 

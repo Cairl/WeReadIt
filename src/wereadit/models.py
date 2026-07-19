@@ -11,15 +11,34 @@ from typing import Any
 
 @dataclass
 class ReadResult:
-    """阅读循环执行结果。"""
+    """阅读循环执行结果。
 
+    包含运行 metrics,用于推送时展示账号健康度。
+    """
+    # 基础结果
     completed_count: int  # 成功完成的阅读次数
     total_minutes: float  # 累计阅读时长（分钟）
+
+    # 运行 metrics（用于评估账号健康度与保活策略生效情况）
+    synckey_success: int = 0  # synckey 成功次数(直接成功 + fix 后重试成功)
+    no_synckey_fix_triggered: int = 0  # fix_no_synckey 触发次数
+    fix_retry_success: int = 0  # fix 后重试 read 成功的次数
+    cookie_refresh_count: int = 0  # refresh_cookie 触发次数(含启动 1 次)
+    circuit_breaker_triggered: bool = False  # 是否触发熔断
 
     @property
     def is_full_completed(self) -> bool:
         """是否完成了全部阅读次数（由调用方判断阈值）。"""
         return self.completed_count > 0
+
+    def summary(self) -> str:
+        """生成 metrics 摘要文本,用于推送内容。"""
+        return (
+            f"本次统计：成功 {self.synckey_success} 次 / "
+            f"fix 触发 {self.no_synckey_fix_triggered} 次 / "
+            f"fix 重试成功 {self.fix_retry_success} 次 / "
+            f"cookie 刷新 {self.cookie_refresh_count} 次"
+        )
 
 
 @dataclass

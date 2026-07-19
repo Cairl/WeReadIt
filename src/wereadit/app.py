@@ -12,7 +12,7 @@ import logging
 import traceback
 
 from wereadit.config import load_config
-from wereadit.exceptions import CookieExpiredError
+from wereadit.exceptions import CookieExpiredError, ReadFailedError
 from wereadit.infra.http import HttpClient
 from wereadit.push import push
 
@@ -41,7 +41,9 @@ def main() -> int:
 
         result = read_books(client, cfg, refresh_print=refresh_print)
         push_content = (
-            f"WeReadIt 自动阅读完成。\n阅读时长：{result.total_minutes} 分钟。"
+            f"WeReadIt 自动阅读完成。\n"
+            f"阅读时长：{result.total_minutes} 分钟。\n"
+            f"{result.summary()}"
         )
 
         # 兑换阅读奖励
@@ -71,6 +73,12 @@ def main() -> int:
         logger.error("Cookie 刷新失败：%s", exc)
         if push_method:
             push(str(exc), push_method, client, cfg, is_success=False)
+        exit_code = 1
+
+    except ReadFailedError as exc:
+        logger.error("阅读熔断：%s", exc)
+        if push_method:
+            push(f"WeReadIt 阅读熔断：{exc}", push_method, client, cfg, is_success=False)
         exit_code = 1
 
     except Exception as exc:  # noqa: BLE001

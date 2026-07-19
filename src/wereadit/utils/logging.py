@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import sys
 
+
 def setup_logging() -> logging.Logger:
     """配置 root logger，返回名为 wereadit 的 logger。"""
     root = logging.getLogger()

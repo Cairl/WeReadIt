@@ -162,6 +162,40 @@ pytest
 ruff check src tests
 ```
 
+## 保活策略说明
+
+本项目基于 wxread 重构,**完整保留了 21 项保活策略**。详见 [`wxread_keepalive_analysis.md`](./wxread_keepalive_analysis.md)。
+
+### 绝对不要删除的代码
+
+即使看起来"没有实际业务意义",以下代码都是保活机制,**删除会导致长期运行失效**:
+
+| 代码 | 位置 | 作用 |
+|------|------|------|
+| 启动强制 `refresh_cookie()` | `core/reader.py` | 上线握手,告知服务器客户端在线 |
+| 3 种 `COOKIE_DATA_VARIANTS` | `constants.py` | 应对 renewal 接口版本变化 |
+| `fix_no_synckey()` | `core/reader.py` | 调 chapterInfos 触发服务器重建上下文 |
+| `FIX_SYNCKEY_BOOK_IDS = ["3300060341"]` | `constants.py` | 写死的特殊 bookId,触发上下文重建 |
+| `last_time = now - SECONDS_PER_READ` | `core/reader.py` | 伪造"已读 30 秒" |
+| `data.pop("s")` | `core/reader.py` | 删除上次签名,防止用旧 s |
+| `DEFAULT_READ_DATA` 固定字段(ci/co/sm/pr/ps/pc) | `constants.py` | 上下文指纹,实测必须固定 |
+| `time.sleep(READ_INTERVAL_SECONDS)` | `core/reader.py` | 30 秒固定节奏,调快触发风控 |
+| `baggage` Sentry 头 | `constants.py` | 浏览器指纹,真实浏览器才有 |
+| `keepalive-job` | `.github/workflows/deploy.yml` | 防 GitHub Actions 60 天自动禁用 |
+| `DNS 8.8.8.8` | `.github/workflows/deploy.yml` | 基础设施保活,解决 DNS 解析 |
+| `cal_hash` / `encode_data` 混淆变量名 | `utils/crypto.py` | 服务器签名校验,不能改算法 |
+
+### 修改前必读
+
+修改任何保活策略相关代码前,请先阅读 [`wxread_keepalive_analysis.md`](./wxread_keepalive_analysis.md) 对应章节,确认改动不会破坏:
+
+- wr_skey 续期机制
+- synckey 状态同步
+- 服务器上下文重建
+- 风控规避
+
+改进计划与已实施记录见 [`wxread_keepalive_improvement_plan.md`](./wxread_keepalive_improvement_plan.md)。
+
 ## 致谢
 
 项目灵感及部分代码实现参考自 [findmover/wxread](https://github.com/findmover/wxread)，由衷感谢原作者技术支持。

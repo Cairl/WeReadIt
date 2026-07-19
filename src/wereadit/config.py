@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,6 +27,8 @@ from wereadit.constants import (
     PLATFORM_IOS,
 )
 from wereadit.infra.curl_parser import parse_curl
+
+logger = logging.getLogger(__name__)
 
 _SCHEMAS_DIR = Path(__file__).parent / "schemas"
 
@@ -128,6 +131,11 @@ def load_config() -> Config:
     if curl_bash:
         headers, cookies = parse_curl(curl_bash)
     else:
+        logger.warning(
+            "未配置 WEREAD_CURL_BASH，使用默认 cookies 模板。"
+            "生产环境必须配置自己的 curl_bash，否则请求会被服务器拒绝。"
+            "本地调试可参考 README.md 抓包步骤。"
+        )
         headers, cookies = dict(DEFAULT_HEADERS), dict(DEFAULT_COOKIES)
 
     read_num_raw = _env("READ_NUM", str(DEFAULT_READ_NUM))

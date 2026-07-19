@@ -13,26 +13,56 @@ FIX_SYNCKEY_URL = "https://weread.qq.com/web/book/chapterInfos"
 # 兑换接口
 EXCHANGE_URL = "https://i.weread.qq.com/weekly/exchange"
 
-# 加密盐（用于 sg 字段签名）
+# 【保活策略 - SIGN_KEY 不能改】
+# 用于 sg 字段签名: sg = sha256(ts + rn + SIGN_KEY)
+# 逆向自微信读书 web 端 JS,服务器据此验证请求合法性
+# 详见 wxread_keepalive_analysis.md 第 6.1 节
 SIGN_KEY = "3c5c8717f3daf09iop3423zafeqoi"
 
 # 阅读循环默认参数
 DEFAULT_READ_NUM = 120
+# 【保活策略 - 30 秒是经验值,不能调快】
+# 模拟真实阅读"翻一页停 30 秒"的节奏,调快会触发风控
+# 详见 wxread_keepalive_analysis.md 第 2.1 节
 READ_INTERVAL_SECONDS = 30
 SECONDS_PER_READ = 30  # 每次阅读计 30 秒
 
-# Cookie 刷新时尝试的 payload 变体
+# 熔断阈值（防止死循环卡死 GitHub Actions）
+# 连续 N 次无 synckey → 抛 ReadFailedError
+# 连续 N 次 cookie 过期 → 抛 CookieExpiredError
+MAX_NO_SYNCKEY = 5
+MAX_COOKIE_FAIL = 3
+# 熔断前的短暂退避（秒），避免连发请求触发风控
+CIRCUIT_BREAKER_BACKOFF = 5
+
+# refresh_cookie 多轮重试参数
+# 第 1 轮失败后等 REFRESH_COOKIE_BASE_WAIT 秒重试第 2 轮
+# 总耗时 = 3 种 payload × 1s + 30s + 3 种 payload × 1s ≈ 36s
+REFRESH_COOKIE_MAX_ROUNDS = 2
+REFRESH_COOKIE_BASE_WAIT = 30
+
+# 【保活策略 - 不能简化为 1 种】
+# 应对 renewal 接口版本变化,3 种 payload 提高续期成功率
+# 详见 wxread_keepalive_analysis.md 第 4.2 节
 COOKIE_DATA_VARIANTS = [
     {"rq": "%2Fweb%2Fbook%2Fread", "ql": False},
     {"rq": "%2Fweb%2Fbook%2Fread", "ql": True},
     {"rq": "%2Fweb%2Fbook%2Fread"},
 ]
 
-# 修复 synckey 时使用的默认 bookId
+# 【保活策略 - bookId 不能改】
+# 不在 books.json 列表里,是写死的特殊 ID,用于触发服务器重建阅读上下文
+# 长期删除会导致"刷了但时长不增加"
+# 详见 wxread_keepalive_analysis.md 第 5.3 节
 FIX_SYNCKEY_BOOK_IDS = ["3300060341"]
 
 # HTTP 请求默认超时（秒）
 DEFAULT_TIMEOUT = 10
+# 【保活策略 - 各接口超时分级】
+# read 主业务可能慢响应,放宽到 15s;renewal/fix 应快,保持 10s
+READ_TIMEOUT = 15
+RENEW_TIMEOUT = 10
+FIX_SYNCKEY_TIMEOUT = 10
 EXCHANGE_TIMEOUT = 15
 PUSH_TIMEOUT = 30
 
@@ -83,7 +113,11 @@ ERRCODE_TOKEN_EXPIRED = -2012
 # 默认兑换策略
 DEFAULT_EXCHANGE_AWARD = "2,2,2,2,2,2,2,2"
 
-# 默认阅读数据模板（读三体）
+# 【保活策略 - data 固定字段不能改成动态】
+# 作者实测得出:appId/ci/co/sm/pr/ps/pc 必须保持初始值
+# 改动会导致"阅读时间不增加"(README issue 已证实)
+# 详见 wxread_keepalive_analysis.md 第 3.1 节
+# 每次循环只更新: b/c(随机) + ct/rt/ts/rn/sg/s(动态)
 DEFAULT_READ_DATA = {
     "appId": "wb182564874603h266381671",
     "b": "ce032b305a9bc1ce0b0dd2a",
@@ -102,7 +136,10 @@ DEFAULT_READ_DATA = {
     "s": "36cc0815",
 }
 
-# 默认 headers 模板（本地部署时由用户替换）
+# 【保活策略 - headers 必须保留 baggage Sentry 头】
+# 这是 Sentry SDK 自动注入的浏览器指纹,真实浏览器才有
+# 删除会被风控识别为非浏览器请求
+# 详见 wxread_keepalive_analysis.md 第 6.3 节
 DEFAULT_HEADERS = {
     "accept": "application/json, text/plain, */*",
     "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,ko;q=0.5",

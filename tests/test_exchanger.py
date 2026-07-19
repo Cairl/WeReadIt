@@ -11,27 +11,29 @@ from wereadit.constants import (
     AWARD_LEVEL_IDS,
     CHOICE_COIN,
     ERRCODE_TOKEN_EXPIRED,
-    PLATFORM_ANDROID,
-    PLATFORM_IOS,
 )
 from wereadit.core.exchanger import _parse_strategy, exchange_awards
 from wereadit.exceptions import ExchangeError
 
 
 def _make_cfg(**overrides) -> Config:
+    """构造测试用 Config。
+
+    push_method / weread_access_token / weread_platform 是 @property，
+    不能作为构造参数，由对应 token 字段自动派生。
+    """
     defaults = dict(
         read_num=2,
         books=["b1"],
         chapters=["c1"],
-        push_method="",
         pushplus_token="",
         wxpusher_spt="",
         telegram_bot_token="",
         telegram_chat_id="",
         serverchan_spt="",
-        weread_access_token="test_token",
+        weread_android_token="test_token",
+        weread_ios_token="",
         exchange_award="2,2,2,2,2,2,2,2",
-        weread_platform=PLATFORM_ANDROID,
         headers={},
         cookies={"wr_vid": "12345"},
         curl_bash="",
@@ -152,7 +154,8 @@ class TestExchangeAwards:
 
     def test_ios_platform(self, mock_client: MagicMock) -> None:
         """iOS 平台应使用 skey header。"""
-        cfg = _make_cfg(weread_platform=PLATFORM_IOS)
+        # 通过 weread_ios_token 触发 weread_platform=PLATFORM_IOS
+        cfg = _make_cfg(weread_android_token="", weread_ios_token="ios_token")
         query_resp = _mock_award_data()
         mock_response = MagicMock()
         mock_response.status_code = 200
