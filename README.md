@@ -1,143 +1,176 @@
 # WeReadIt
 
-微信读书自动阅读脚本。通过模拟官网 `read` 接口刷阅读时长与挑战赛保持天数，支持自动刷新 Cookie、兑换阅读奖励、多渠道推送结果。
+微信读书自动阅读脚本。
+
+通过模拟微信读书 Web `read` 接口完成阅读，支持自动刷新 Cookie、自动兑换每周奖励、多渠道消息推送，适合 GitHub Actions 或服务器长期运行。
 
 ## 功能特性
 
-- 自动阅读，默认 60 分钟（可配置）
-- Cookie 自动刷新，一次部署长期运行
-- 自动兑换每周阅读奖励（书币/体验卡，可选）
-- 支持 PushPlus / WxPusher / Telegram / ServerChan 四种推送
-- 适合 GitHub Actions 或服务器定时运行
+- 自动阅读（默认 60 分钟，可配置）
+- Cookie 自动刷新，部署后长期运行
+- 自动兑换每周阅读奖励（书币 / 无限卡，可选）
+- 支持 PushPlus、WxPusher、Telegram、ServerChan 推送
+- 支持 GitHub Actions、服务器定时任务
 
 ## 快速开始
 
-### 1. 抓包 read 接口
+### 1. 获取 `read` 请求
 
-在 [微信读书官网](https://weread.qq.com/) 搜索任意书籍（推荐[《三体》](https://weread.qq.com/web/reader/ce032b305a9bc1ce0b0dd2a)），打开阅读并翻页。用浏览器开发者工具抓到 `read` 接口 `https://weread.qq.com/web/book/read`，确认返回：
+1. 登录微信读书网页版。
+2. 打开任意书籍（推荐《三体》）开始阅读并翻页。
+3. 使用浏览器开发者工具抓取：
 
-```json
-{"succ": 1, "synckey": 564589834}
+```
+POST https://weread.qq.com/web/book/read
 ```
 
-右键复制该请求为 cURL (Bash) 格式备用。
+确认返回：
 
-### 2. 配置 GitHub Secrets / Variables
+```json
+{"succ":1}
+```
 
-在仓库 **Settings -> Secrets and variables -> Actions** 中配置：
+复制该请求为 **cURL (Bash)**。
 
-**Secrets（必填）**
+### 2. 配置 GitHub Secrets
 
-| key | 说明 |
-| --- | --- |
+仓库进入 **Settings → Secrets and variables → Actions**。
+
+**必填**
+
+| Secret             | 说明                   |
+| ------------------ | ---------------------- |
 | `WEREAD_CURL_BASH` | 上一步复制的 cURL 命令 |
 
-**Secrets（推送渠道，按需选一个配置即可）**
+**推送（按需配置）**
 
-推送渠道采用自动检测机制：配置哪个渠道的 token，就自动激活该渠道。
+| Secret                                    | 渠道       |
+| ----------------------------------------- | ---------- |
+| `PUSHPLUS_TOKEN`                          | PushPlus   |
+| `WXPUSHER_SPT`                            | WxPusher   |
+| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Telegram   |
+| `SERVERCHAN_SPT`                          | ServerChan |
 
-| key | 适用渠道 | 获取地址 |
-| --- | --- | --- |
-| `PUSHPLUS_TOKEN` | pushplus | https://www.pushplus.plus/uc.html |
-| `WXPUSHER_SPT` | wxpusher | https://wxpusher.zjiecode.com/docs/#/?id=获取spt |
-| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | telegram | BotFather 创建机器人 |
-| `SERVERCHAN_SPT` | serverchan | https://sct.ftqq.com/sendkey |
+如果同时配置多个推送渠道，将按以下顺序选择：
 
-> 如果同时配置了多个渠道的 token，优先使用 pushplus > wxpusher > telegram > serverchan。
+```
+PushPlus → WxPusher → Telegram → ServerChan
+```
 
-**Variables（可选）**
+**兑换奖励（按需配置）**
 
-| key | 默认值 | 说明 |
-| --- | --- | --- |
-| `READ_NUM` | `120` | 阅读次数（每次 30 秒，120 次 = 60 分钟） |
-| `EXCHANGE_AWARD` | `2,2,2,2,2,2,2,2` | 兑换策略，8 位逗号分隔，`0`=不兑/`1`=体验卡/`2`=书币 |
+| Secret                 | 说明                  |
+| ---------------------- | --------------------- |
+| `WEREAD_ANDROID_TOKEN` | Android `accessToken` |
+| `WEREAD_IOS_TOKEN`     | iOS `skey`            |
 
-**Secrets（兑换功能，可选）**
+### 3. 配置 Variables（可选）
 
-按需选一个配置即可：
+| Variable         | 默认值            | 说明                                           |
+| ---------------- | ----------------- | ---------------------------------------------- |
+| `READ_NUM`       | `120`             | 阅读次数（120 次 ≈ 60 分钟）                   |
+| `EXCHANGE_AWARD` | `2,2,2,2,2,2,2,2` | 奖励兑换策略，`0`=不兑换，`1`=体验卡，`2`=书币 |
 
-| key | 说明 |
-| --- | --- |
-| `WEREAD_ANDROID_TOKEN` | Android 端 `accessToken` |
-| `WEREAD_IOS_TOKEN` | iOS 端 `skey` |
+### 4. 运行
 
-### 3. 运行
+推送到 GitHub 后即可运行。
 
-推送到 GitHub 即可。默认每天北京时间 00:00 自动运行，也可在 Actions 页面手动触发。
+默认每天 **北京时间 00:00** 自动执行，支持在 GitHub Actions 页面手动触发。
 
-## 兑换奖励的 token 抓包
+---
 
-兑换功能需要 APP 端认证 token（网页 cookie 调不通该接口）：
+## 奖励兑换
 
-1. 安卓用 Reqable，iOS 用 ProxyPin
-2. 安装 CA 证书后启动抓包
-3. 打开微信读书 APP 正常使用
-4. 在抓包工具里按域名 `i.weread.qq.com` 筛选任意请求
-5. Android 查看请求头 `accessToken`，iOS 查看 `skey`
-6. Android 配置到 `WEREAD_ANDROID_TOKEN`，iOS 配置到 `WEREAD_IOS_TOKEN`
+网页 Cookie 无法调用奖励兑换接口，需要使用微信读书 App 的认证 Token。
 
-token 有有效期（实测数天），过期后兑换功能会推送「登录超时」通知，重新抓包即可。`vid` 无需单独配置，脚本会从网页 cookie 的 `wr_vid` 自动提取。
+抓包步骤：
+
+1. Android 推荐使用 Reqable，iOS 推荐使用 ProxyPin。
+2. 安装并信任抓包证书。
+3. 打开微信读书 App。
+4. 抓取 `i.weread.qq.com` 任意请求。
+5. 获取：
+   - Android：请求头 `accessToken`
+   - iOS：请求头 `skey`
+6. 按需配置到：
+   - `WEREAD_ANDROID_TOKEN`
+   - `WEREAD_IOS_TOKEN`
+
+> Token 通常有效数天，过期后需重新抓包。`wr_vid` 会自动从网页 Cookie 获取，无需额外配置。
 
 ## 本地运行
 
 ```bash
-git clone <仓库地址>
+git clone <repository>
 cd WeReadIt
+
 pip install -r requirements.txt
 
-# 通过环境变量配置（推荐）
 export WEREAD_CURL_BASH='curl ...'
-export PUSHPLUS_TOKEN=xxx      # 配置哪个渠道就激活哪个
+
+# 可选
+export PUSHPLUS_TOKEN=xxxx
+
 python main.py
 ```
 
-或直接编辑 `src/wereadit/constants.py` 中的 `DEFAULT_HEADERS` 和 `DEFAULT_COOKIES`，省去环境变量。
+或直接修改 `src/wereadit/constants.py` 中的默认请求头和 Cookie 进行本地调试。
+
+## 配置说明
+
+| 配置项           | 默认值            | 说明                      |
+| ---------------- | ----------------- | ------------------------- |
+| `READ_NUM`       | `120`             | 默认阅读约 60 分钟        |
+| `EXCHANGE_AWARD` | `2,2,2,2,2,2,2,2` | 默认全部兑换书币          |
+| 默认书籍         | 《三体》          | 可自行修改                |
+| Cookie           | 自动刷新          | 失效后自动更新            |
+| 推送失败         | 最多重试 5 次     | 每次间隔 3～6 分钟        |
+| 挑战赛模式       | `READ_NUM=2`      | 阅读约 1 分钟即可完成签到 |
 
 ## 项目结构
 
-```
+```text
 WeReadIt/
-├── main.py                    # 入口（兼容 python main.py）
-├── src/wereadit/
-│   ├── app.py                 # 编排：阅读 -> 兑换 -> 推送
-│   ├── config.py              # 配置加载（Config dataclass）
-│   ├── constants.py           # URL / 加密盐 / 默认值
-│   ├── core/
-│   │   ├── reader.py          # 阅读循环 + cookie 刷新
-│   │   └── exchanger.py       # 奖励兑换
-│   ├── infra/
-│   │   ├── http.py            # HttpClient（requests.Session 封装）
-│   │   └── curl_parser.py     # cURL 命令解析
-│   ├── push/                  # 推送渠道（策略模式 + 注册表）
-│   │   ├── base.py
-│   │   ├── registry.py
-│   │   └── {pushplus,wxpusher,telegram,serverchan}.py
-│   ├── utils/{crypto,logging}.py
-│   └── schemas/books.json     # 书籍/章节列表
-└── tests/                     # 单元测试
+├── main.py
+├── src/
+│   └── wereadit/
+│       ├── core/         # 阅读、奖励兑换
+│       ├── infra/        # HTTP、cURL 解析
+│       ├── push/         # 推送渠道
+│       ├── utils/        # 工具函数
+│       ├── config.py
+│       └── app.py
+├── tests/
+└── requirements*.txt
 ```
 
-新增推送渠道只需在 `src/wereadit/push/` 下新建一个文件，用 `@register("xxx")` 装饰即可，无需改动主流程。
+新增推送渠道只需在 `src/wereadit/push/` 下新增实现，并使用：
+
+```python
+@register("your_channel")
+```
+
+即可自动注册，无需修改主流程。
 
 ## 开发
 
 ```bash
 pip install -r requirements-dev.txt
-pytest tests/                 # 37 个单元测试
-ruff check src/ tests/        # 代码风格检查
+
+pytest
+
+ruff check src tests
 ```
-
-## 注意事项
-
-- 只需完成挑战赛签到可将 `READ_NUM` 设为 `2`（1 分钟）
-- 默认阅读《三体》，换其他书籍自行测试时长是否累计
-- Cookie 失效后脚本会自动刷新，刷新失败会推送通知
-- 推送失败有 5 次重试，间隔 3-6 分钟随机
 
 ## 致谢
 
-项目灵感及部分代码来自 [findmover/wxread](https://github.com/findmover/wxread)，感谢技术支持。
+项目灵感及部分代码实现参考自 [findmover/wxread](https://github.com/findmover/wxread)，由衷感谢原作者技术支持。
 
-## 许可
+## 免责声明
 
-仅供学习交流使用，请勿用于商业用途。
+- 本项目**仅供学习交流**，严禁用于商业用途或任何违反微信读书服务条款的行为。
+- 本项目与**微信读书（weread.qq.com）及其运营方腾讯公司无任何关联**，未获得其任何形式的授权或认可。
+- 使用本项目可能违反微信读书用户协议，包括但不限于禁止使用自动化脚本的规定。使用者应自行承担由此产生的全部风险和后果，包括但不限于 **账号封禁、阅读时长清零、奖励回收**等。
+- 项目维护者**不承担任何责任**，不因任何人使用本项目或其衍生作品而产生的任何直接或间接损失负责。
+- 使用者应当在充分了解上述风险的前提下，自行决定是否使用本项目。开始使用即视为已阅读并接受本免责声明的全部内容。
+- 本项目不提供任何担保，包括但不限于可用性、稳定性、安全性的担保。
