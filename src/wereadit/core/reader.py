@@ -121,7 +121,7 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
 
         if refresh_print:
             refresh_print(
-                f"阅读进度: 第 {index}/{total} 次，已完成 {(index - 1) * 0.5:.1f} 分钟"
+                f"阅读进度: 第 {index}/{total} 次，已阅读 {(index - 1) * 0.5:.1f} 分钟"
             )
         logger.debug("data: %s", data)
 
