@@ -66,7 +66,7 @@
 
 兑换功能需要 APP 端认证 token（网页 cookie 调不通该接口）：
 
-1. 安卓用 Reqable / HTTP Canary，iOS 用 Stream / ProxyPin
+1. 安卓用 Reqable，iOS 用 ProxyPin
 2. 安装 CA 证书后启动抓包
 3. 打开微信读书 APP 正常使用
 4. 在抓包工具里按域名 `i.weread.qq.com` 筛选任意请求
@@ -89,7 +89,7 @@ export PUSHPLUS_TOKEN=xxx
 python main.py
 ```
 
-也可直接编辑 `src/wereadit/constants.py` 中的 `DEFAULT_HEADERS` 和 `DEFAULT_COOKIES`，省去环境变量。
+或直接编辑 `src/wereadit/constants.py` 中的 `DEFAULT_HEADERS` 和 `DEFAULT_COOKIES`，省去环境变量。
 
 ## 项目结构
 
