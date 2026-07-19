@@ -32,14 +32,14 @@ jobs:
       uses: actions/checkout@v2
 
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: '3.10'
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install certifi==2024.8.30 charset-normalizer==3.4.0 idna==3.10 requests==2.32.3 urllib3==2.2.3
+        pip install -r requirements.txt
 
     - name: Run deployment script
       env:
@@ -49,8 +49,11 @@ jobs:
         WXPUSHER_SPT: ${{ secrets.WXPUSHER_SPT }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        SERVERCHAN_SPT:  ${{ secrets.SERVERCHAN_SPT }}
-        READ_NUM: ${{ vars.READ_NUM }}  # 使用 Repository Variables
+        SERVERCHAN_SPT: ${{ secrets.SERVERCHAN_SPT }}
+        WEREAD_ACCESS_TOKEN: ${{ secrets.WEREAD_ACCESS_TOKEN }}
+        READ_NUM: ${{ vars.READ_NUM }}
+        WEREAD_PLATFORM: ${{ vars.WEREAD_PLATFORM }}
+        EXCHANGE_AWARD: ${{ vars.EXCHANGE_AWARD }}
 
       run: |
         python main.py

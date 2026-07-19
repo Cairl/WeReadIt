@@ -1,0 +1,96 @@
+"""push 注册表与工厂测试。"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from wereadit.config import Config
+from wereadit.constants import PLATFORM_ANDROID
+from wereadit.push.base import Pusher
+from wereadit.push.registry import _PUSHERS, get_pusher, push
+
+
+def _make_cfg(**overrides) -> Config:
+    """构造测试用 Config。"""
+    defaults = dict(
+        read_num=2,
+        books=["b1"],
+        chapters=["c1"],
+        push_method="",
+        pushplus_token="",
+        wxpusher_spt="",
+        telegram_bot_token="",
+        telegram_chat_id="",
+        serverchan_spt="",
+        weread_access_token="",
+        exchange_award="2,2,2,2,2,2,2,2",
+        weread_platform=PLATFORM_ANDROID,
+        headers={},
+        cookies={},
+        curl_bash="",
+    )
+    defaults.update(overrides)
+    return Config(**defaults)
+
+
+class TestRegistry:
+    def test_all_channels_registered(self) -> None:
+        """4 个渠道都应已注册。"""
+        assert set(_PUSHERS.keys()) == {"pushplus", "wxpusher", "telegram", "serverchan"}
+
+    def test_get_pusher_unknown_method(self, mock_client: MagicMock) -> None:
+        """未知渠道返回 None。"""
+        cfg = _make_cfg()
+        assert get_pusher("unknown", mock_client, cfg) is None
+
+    def test_get_pusher_empty_method(self, mock_client: MagicMock) -> None:
+        """空 method 返回 None。"""
+        cfg = _make_cfg()
+        assert get_pusher("", mock_client, cfg) is None
+
+    def test_get_pusher_pushplus(self, mock_client: MagicMock) -> None:
+        cfg = _make_cfg(pushplus_token="tok123")
+        pusher = get_pusher("pushplus", mock_client, cfg)
+        assert pusher is not None
+        assert pusher.token == "tok123"
+        assert pusher.name == "pushplus"
+
+    def test_get_pusher_case_insensitive(self, mock_client: MagicMock) -> None:
+        cfg = _make_cfg(pushplus_token="tok123")
+        assert get_pusher("PushPlus", mock_client, cfg) is not None
+
+    def test_get_pusher_missing_token(self, mock_client: MagicMock) -> None:
+        """非 telegram 渠道缺 token 返回 None。"""
+        cfg = _make_cfg(pushplus_token="")
+        assert get_pusher("pushplus", mock_client, cfg) is None
+
+
+class TestPushFunction:
+    def test_push_empty_method(self, mock_client: MagicMock) -> None:
+        cfg = _make_cfg()
+        assert push("content", "", mock_client, cfg) is False
+
+    def test_push_unknown_method(self, mock_client: MagicMock) -> None:
+        cfg = _make_cfg()
+        assert push("content", "unknown", mock_client, cfg) is False
+
+    def test_push_pushplus_success(self, mock_client: MagicMock) -> None:
+        cfg = _make_cfg(pushplus_token="tok")
+        result = push("hello", "pushplus", mock_client, cfg)
+        assert result is True
+        mock_client.post.assert_called_once()
+        args, kwargs = mock_client.post.call_args
+        assert "pushplus.plus/send" in args[0]
+        body = kwargs["json"]
+        assert body["token"] == "tok"
+        assert "成功" in body["title"]
+
+
+class TestPusherBase:
+    def test_pusher_abc_cannot_instantiate(self, mock_client: MagicMock) -> None:
+        """Pusher 是抽象基类，不能直接实例化。"""
+        cfg = _make_cfg()
+        with pytest.raises(TypeError):
+            Pusher(mock_client, cfg)
