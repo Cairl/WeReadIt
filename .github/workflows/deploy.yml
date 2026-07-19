@@ -6,8 +6,8 @@ concurrency:
 
 on:
   schedule:
-    # 凌晨任务：北京时间每天 01:00（UTC 前一天 17:00）
-    - cron: '0 17 * * *'
+    # 每天北京时间 00:00（UTC 16:00）
+    - cron: '0 16 * * *'
     # 早间任务：北京时间每天 05:00（UTC 前一天 21:00）
     #- cron: '0 21 * * *'
     # 午间任务：北京时间每天 11:40（UTC 03:40）
@@ -43,8 +43,7 @@ jobs:
 
     - name: Run deployment script
       env:
-        WEREADIT_CURL_BASH: ${{ secrets.WEREADIT_CURL_BASH }}
-        PUSH_METHOD: ${{ secrets.PUSH_METHOD }}
+        WEREAD_CURL_BASH: ${{ secrets.WEREAD_CURL_BASH }}
         PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
         WXPUSHER_SPT: ${{ secrets.WXPUSHER_SPT }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

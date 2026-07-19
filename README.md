@@ -4,7 +4,7 @@
 
 ## 功能特性
 
-- 自动阅读，默认 20 分钟（可配置）
+- 自动阅读，默认 60 分钟（可配置）
 - Cookie 自动刷新，一次部署长期运行
 - 自动兑换每周阅读奖励（书币/体验卡，可选）
 - 支持 PushPlus / WxPusher / Telegram / ServerChan 四种推送
@@ -14,7 +14,7 @@
 
 ### 1. 抓包 read 接口
 
-在 [微信读书官网](https://weread.qq.com/) 搜索任意书籍（推荐《三体》），打开阅读并翻页。用浏览器开发者工具抓到 `read` 接口 `https://weread.qq.com/web/book/read`，确认返回：
+在 [微信读书官网](https://weread.qq.com/) 搜索任意书籍（推荐[《三体》](https://weread.qq.com/web/reader/ce032b305a9bc1ce0b0dd2a)），打开阅读并翻页。用浏览器开发者工具抓到 `read` 接口 `https://weread.qq.com/web/book/read`，确认返回：
 
 ```json
 {"succ": 1, "synckey": 564589834}
@@ -30,10 +30,11 @@
 
 | key | 说明 |
 | --- | --- |
-| `WEREADIT_CURL_BASH` | 上一步复制的 cURL 命令 |
-| `PUSH_METHOD` | 推送渠道：`pushplus` / `wxpusher` / `telegram` / `serverchan` |
+| `WEREAD_CURL_BASH` | 上一步复制的 cURL 命令 |
 
-**Secrets（按推送渠道填）**
+**Secrets（推送渠道，按需选一个配置即可）**
+
+推送渠道采用自动检测机制：配置哪个渠道的 token，就自动激活该渠道。无需额外设置 `PUSH_METHOD`。
 
 | key | 适用渠道 | 获取地址 |
 | --- | --- | --- |
@@ -42,11 +43,13 @@
 | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | telegram | BotFather 创建机器人 |
 | `SERVERCHAN_SPT` | serverchan | https://sct.ftqq.com/sendkey |
 
+> 如果同时配置了多个渠道的 token，优先使用 pushplus > wxpusher > telegram > serverchan。
+
 **Variables（可选）**
 
 | key | 默认值 | 说明 |
 | --- | --- | --- |
-| `READ_NUM` | `40` | 阅读次数（每次 30 秒，40 次 = 20 分钟） |
+| `READ_NUM` | `120` | 阅读次数（每次 30 秒，120 次 = 60 分钟） |
 | `WEREAD_PLATFORM` | `android` | 兑换平台：`android` / `ios` |
 | `EXCHANGE_AWARD` | `2,2,2,2,2,2,2,2` | 兑换策略，8 位逗号分隔，`0`=不兑/`1`=体验卡/`2`=书币 |
 
@@ -60,7 +63,7 @@
 
 ### 3. 运行
 
-推送到 GitHub 即可。默认每天北京时间 01:00 自动运行，也可在 Actions 页面手动触发。
+推送到 GitHub 即可。默认每天北京时间 00:00 自动运行，也可在 Actions 页面手动触发。
 
 ## 兑换奖励的 token 抓包
 
@@ -83,9 +86,8 @@ cd WeReadIt
 pip install -r requirements.txt
 
 # 通过环境变量配置（推荐）
-export WEREADIT_CURL_BASH='curl ...'
-export PUSH_METHOD=pushplus
-export PUSHPLUS_TOKEN=xxx
+export WEREAD_CURL_BASH='curl ...'
+export PUSHPLUS_TOKEN=xxx      # 配置哪个渠道就激活哪个
 python main.py
 ```
 

@@ -56,7 +56,6 @@ class Config:
     chapters: list[str] = field(default_factory=list)
 
     # 推送参数
-    push_method: str = ""
     pushplus_token: str = ""
     wxpusher_spt: str = ""
     telegram_bot_token: str = ""
@@ -84,16 +83,33 @@ class Config:
         }
         return token_map.get(method, "")
 
+    @property
+    def push_method(self) -> str:
+        """自动检测已配置的推送渠道。
+
+        按优先级检测各渠道的 token/凭证，首个已配置的即为激活渠道。
+        若为 telegram，需同时配置 bot_token 和 chat_id。
+        """
+        if self.pushplus_token:
+            return "pushplus"
+        if self.wxpusher_spt:
+            return "wxpusher"
+        if self.telegram_bot_token and self.telegram_chat_id:
+            return "telegram"
+        if self.serverchan_spt:
+            return "serverchan"
+        return ""
+
 
 def load_config() -> Config:
     """从环境变量加载配置。
 
     优先级：环境变量 > 默认值。
-    若提供 WEREADIT_CURL_BASH，则从中解析 headers/cookies；否则使用默认模板。
+    若提供 WEREAD_CURL_BASH，则从中解析 headers/cookies；否则使用默认模板。
     """
     books, chapters = _load_books()
 
-    curl_bash = _env("WEREADIT_CURL_BASH")
+    curl_bash = _env("WEREAD_CURL_BASH")
     if curl_bash:
         headers, cookies = parse_curl(curl_bash)
     else:
@@ -109,7 +125,6 @@ def load_config() -> Config:
         read_num=read_num,
         books=books,
         chapters=chapters,
-        push_method=_env("PUSH_METHOD"),
         pushplus_token=_env("PUSHPLUS_TOKEN"),
         wxpusher_spt=_env("WXPUSHER_SPT"),
         telegram_bot_token=_env("TELEGRAM_BOT_TOKEN"),

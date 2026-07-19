@@ -17,7 +17,7 @@ EXCHANGE_URL = "https://i.weread.qq.com/weekly/exchange"
 SIGN_KEY = "3c5c8717f3daf09iop3423zafeqoi"
 
 # 阅读循环默认参数
-DEFAULT_READ_NUM = 40
+DEFAULT_READ_NUM = 120
 READ_INTERVAL_SECONDS = 30
 SECONDS_PER_READ = 30  # 每次阅读计 30 秒
 
