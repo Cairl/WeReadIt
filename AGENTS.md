@@ -87,6 +87,14 @@ src/wereadit/
 
 GitHub Actions 定时触发（`deploy.yml`），北京时间每天 00:00 运行。环境变量通过 Secrets/Variables 注入，详见 README。
 
+## Changelog
+
+### 2026-07-20
+
+- **修复**: `app.py` 兑换异常处理区分 `ExchangeError(errcode==-2012)`（Token 过期）和其他错误。Token 过期时设置 `exit_code=1`，推送消息包含明确提示；不再被 `except Exception` 兜底静默吞掉。
+- **修复**: `exchanger.py` 查询奖励的 `_call_exchange` 调用增加 try/except，Token 过期时 re-raise，与单个奖励兑换循环行为保持一致。
+- **变更**: Secret 环境变量名简化：`PUSHPLUS_TOKEN` → `PUSHPLUS`、`WXPUSHER_SPT` → `WXPUSHER`、`SERVERCHAN_SPT` → `SERVERCHAN`。同步更新 `config.py`、`README.md`、`.github/workflows/deploy.yml`。需同步修改 GitHub 仓库的 Secrets 名称。
+
 ## Pull Request Guidelines
 
 - 标题格式：`[模块] 简要描述`，如 `[push] 新增钉钉推送渠道`

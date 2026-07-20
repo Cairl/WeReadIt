@@ -24,12 +24,6 @@
 POST https://weread.qq.com/web/book/read
 ```
 
-确认返回：
-
-```json
-{"succ":1}
-```
-
 复制该请求为 **cURL (Bash)**。
 
 ### 2. 配置 Secrets and Variables
@@ -54,11 +48,11 @@ POST https://weread.qq.com/web/book/read
 
 | 配置项               | 类型   | 要求 | 默认值 | 说明                                    |
 | -------------------- | ------ | ---- | ------ | --------------------------------------- |
-| `PUSHPLUS_TOKEN`     | Secret | 选填 | -      | PushPlus 推送 token                     |
-| `WXPUSHER_SPT`       | Secret | 选填 | -      | WxPusher 推送 token                     |
+| `PUSHPLUS`           | Secret | 选填 | -      | PushPlus 推送 token                     |
+| `WXPUSHER`           | Secret | 选填 | -      | WxPusher 推送 token                     |
 | `TELEGRAM_BOT_TOKEN` | Secret | 选填 | -      | Telegram Bot token（需同时配置 CHAT_ID） |
 | `TELEGRAM_CHAT_ID`   | Secret | 选填 | -      | Telegram 会话 ID（需同时配置 BOT_TOKEN） |
-| `SERVERCHAN_SPT`     | Secret | 选填 | -      | ServerChan 推送 token                   |
+| `SERVERCHAN`         | Secret | 选填 | -      | ServerChan 推送 token                   |
 
 ## 奖励兑换
 
@@ -90,7 +84,7 @@ pip install -r requirements.txt
 export WEREAD_CURL_BASH='curl ...'
 
 # 可选
-export PUSHPLUS_TOKEN=xxxx
+export PUSHPLUS=xxxx
 
 python main.py
 ```

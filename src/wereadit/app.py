@@ -12,7 +12,8 @@ import logging
 import traceback
 
 from wereadit.config import load_config
-from wereadit.exceptions import CookieExpiredError, ReadFailedError
+from wereadit.constants import ERRCODE_TOKEN_EXPIRED
+from wereadit.exceptions import CookieExpiredError, ExchangeError, ReadFailedError
 from wereadit.infra.http import HttpClient
 from wereadit.push import push
 
@@ -53,6 +54,17 @@ def main() -> int:
                 from wereadit.core.exchanger import exchange_awards
 
                 exchange_summary = exchange_awards(client, cfg)
+            except ExchangeError as exc:
+                if exc.errcode == ERRCODE_TOKEN_EXPIRED:
+                    logger.error("兑换 Token 已过期: %s", exc)
+                    exchange_summary = (
+                        "兑换奖励失败: WEREAD_ANDROID_TOKEN / WEREAD_IOS_TOKEN 已过期，"
+                        "请重新抓包更新 Secret 中的 Token。"
+                    )
+                    exit_code = 1
+                else:
+                    logger.error("兑换奖励异常: %s", exc)
+                    exchange_summary = f"兑换奖励失败: {exc}"
             except Exception as exc:  # noqa: BLE001
                 logger.error("兑换奖励异常: %s", exc)
                 exchange_summary = f"兑换奖励失败: {exc}"

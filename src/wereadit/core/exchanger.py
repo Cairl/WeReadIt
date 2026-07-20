@@ -155,7 +155,13 @@ def exchange_awards(
         "pf": _get_pf(cfg.weread_platform),
         "awardChoiceType": 0,
     }
-    award_data = _call_exchange(client, auth_token, vid, cfg.weread_platform, query_body)
+    try:
+        award_data = _call_exchange(client, auth_token, vid, cfg.weread_platform, query_body)
+    except ExchangeError as exc:
+        if exc.errcode == ERRCODE_TOKEN_EXPIRED:
+            raise
+        logger.error("查询奖励失败: %s", exc)
+        return f"兑换奖励失败: {exc}"
 
     reading_time = award_data.get("readingTime", 0)
     reading_day = award_data.get("readingDay", 0)
