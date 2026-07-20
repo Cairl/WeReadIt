@@ -229,7 +229,10 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
                     logger.error(msg)
                     circuit_breaker_triggered = True
                     raise ReadFailedError(msg)
-                logger.warning("无 synckey，尝试修复...")
+                logger.warning(
+                    "无 synckey（连续第 %d/%d 次），尝试修复...",
+                    no_synckey_streak, MAX_NO_SYNCKEY,
+                )
                 fix_no_synckey(client, cfg)
                 no_synckey_fix_triggered += 1
                 # 修复后立即重试一次 read（重新签名，因为 ts/rn 需要更新）
@@ -247,7 +250,7 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
                 )
                 retry_data = retry_response.json()
                 if "synckey" in retry_data:
-                    logger.info("synckey 修复成功，继续阅读")
+                    logger.info("synckey 修复成功（第 %d 次修复），继续阅读", no_synckey_fix_triggered)
                     last_time = retry_time
                     index += 1
                     no_synckey_streak = 0

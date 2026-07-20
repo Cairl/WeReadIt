@@ -155,6 +155,8 @@ def exchange_awards(
         "pf": _get_pf(cfg.weread_platform),
         "awardChoiceType": 0,
     }
+    # 查询失败不重试（与兑换循环不同）：Token 过期 re-raise 由 app.py 处理，
+    # 其他 ExchangeError 转字符串返回；网络异常等非 ExchangeError 直接抛出由上层兜底。
     try:
         award_data = _call_exchange(client, auth_token, vid, cfg.weread_platform, query_body)
     except ExchangeError as exc:

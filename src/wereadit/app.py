@@ -35,6 +35,7 @@ def main() -> int:
     push_method = cfg.push_method
     exchange_summary = ""
     exit_code = 0
+    has_failure = False  # 推送状态标志：兑换失败但阅读成功时为 False；Token 过期等致命错误为 True
 
     try:
         # 阅读循环
@@ -62,6 +63,7 @@ def main() -> int:
                         "请重新抓包更新 Secret 中的 Token。"
                     )
                     exit_code = 1
+                    has_failure = True
                 else:
                     logger.error("兑换奖励异常: %s", exc)
                     exchange_summary = f"兑换奖励失败: {exc}"
@@ -77,7 +79,7 @@ def main() -> int:
         # 推送成功通知
         if push_method:
             logger.info("开始推送...")
-            push(push_content, push_method, client, cfg, is_success=True)
+            push(push_content, push_method, client, cfg, is_success=not has_failure)
         else:
             logger.info("未配置推送渠道，跳过推送。")
 

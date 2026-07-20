@@ -46,6 +46,26 @@ def _env(name: str, default: str = "") -> str:
     return os.getenv(name) or default
 
 
+def _env_renamed(new_name: str, old_name: str) -> str:
+    """读取重命名后的环境变量，新名优先，旧名作为向后兼容 fallback。
+
+    Secret 重命名后老用户可能仍配置旧名，命中旧名时发 deprecated 警告，
+    引导用户改名，避免长期保留旧名引用。
+    """
+    value = os.getenv(new_name)
+    if value:
+        return value
+    old_value = os.getenv(old_name)
+    if old_value:
+        logger.warning(
+            "环境变量 %s 已废弃，请改用 %s。当前仍读取旧名以保持兼容。",
+            old_name,
+            new_name,
+        )
+        return old_value
+    return ""
+
+
 @dataclass(frozen=True)
 class Config:
     """运行时配置。
@@ -148,11 +168,11 @@ def load_config() -> Config:
         read_num=read_num,
         books=books,
         chapters=chapters,
-        pushplus_token=_env("PUSHPLUS"),
-        wxpusher_spt=_env("WXPUSHER"),
+        pushplus_token=_env_renamed("PUSHPLUS", "PUSHPLUS_TOKEN"),
+        wxpusher_spt=_env_renamed("WXPUSHER", "WXPUSHER_SPT"),
         telegram_bot_token=_env("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=_env("TELEGRAM_CHAT_ID"),
-        serverchan_spt=_env("SERVERCHAN"),
+        serverchan_spt=_env_renamed("SERVERCHAN", "SERVERCHAN_SPT"),
         weread_android_token=_env("WEREAD_ANDROID_TOKEN"),
         weread_ios_token=_env("WEREAD_IOS_TOKEN"),
         exchange_award=_env("EXCHANGE_AWARD", DEFAULT_EXCHANGE_AWARD),
