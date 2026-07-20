@@ -35,3 +35,5 @@ Thumbs.db
 
 # WorkBuddy workspace (临时计划文件，不入库)
 .workbuddy/
+
+changelog.md
