@@ -30,15 +30,15 @@ SECONDS_PER_READ = 30  # 每次阅读计 30 秒
 # 熔断阈值（防止死循环卡死 GitHub Actions）
 # 连续 N 次无 synckey → 抛 ReadFailedError
 # 连续 N 次 cookie 过期 → 抛 CookieExpiredError
-MAX_NO_SYNCKEY = 5
+MAX_NO_SYNCKEY = 3
 MAX_COOKIE_FAIL = 3
 # 熔断前的短暂退避（秒），避免连发请求触发风控
 CIRCUIT_BREAKER_BACKOFF = 5
 
 # refresh_cookie 多轮重试参数
-# 第 1 轮失败后等 REFRESH_COOKIE_BASE_WAIT 秒重试第 2 轮
-# 总耗时 = 3 种 payload × 1s + 30s + 3 种 payload × 1s ≈ 36s
-REFRESH_COOKIE_MAX_ROUNDS = 2
+# 第 1 轮失败后等 REFRESH_COOKIE_BASE_WAIT 秒重试第 2 轮，第 2 轮失败后等 2×BASE_WAIT 秒重试第 3 轮
+# 总耗时 = 3 种 payload × 1s + 30s + 3 种 payload × 1s + 60s + 3 种 payload × 1s ≈ 96s
+REFRESH_COOKIE_MAX_ROUNDS = 3
 REFRESH_COOKIE_BASE_WAIT = 30
 
 # 【保活策略 - 不能简化为 1 种】

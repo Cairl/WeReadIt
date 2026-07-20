@@ -159,18 +159,16 @@ class TestCircuitBreaker:
         """让所有 read/retry 都返回 succ 但无 synckey,fix 返回空。
 
         P1.1 后循环逻辑:read → 无synckey → fix → retry_read → 无synckey → 下一轮
-        第 5 次原始 read 无 synckey 时熔断(不 fix 不 retry)。
+        第 3 次原始 read 无 synckey 时熔断(不 fix 不 retry)。
         """
         renewal_resp = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
         no_synckey_resp = _mock_response({"succ": 1})  # 无 synckey
         fix_resp = _mock_response({})
-        # 4 轮完整失败(read + fix + retry) + 第 5 轮 read 触发熔断
+        # 2 轮完整失败(read + fix + retry) + 第 3 轮 read 触发熔断
         mock_post.side_effect = [renewal_resp] + [
             no_synckey_resp, fix_resp, no_synckey_resp,  # 轮1
             no_synckey_resp, fix_resp, no_synckey_resp,  # 轮2
-            no_synckey_resp, fix_resp, no_synckey_resp,  # 轮3
-            no_synckey_resp, fix_resp, no_synckey_resp,  # 轮4
-            no_synckey_resp,  # 轮5 read 触发熔断
+            no_synckey_resp,  # 轮3 read 触发熔断
         ]
 
     @patch("wereadit.infra.http.requests.Session.post")
@@ -291,19 +289,17 @@ class TestKeepaliveStrategies:
         """策略 #9: 无 synckey 时调 fix_no_synckey。
 
         P1.1 后:read 无synckey → fix → retry_read(也无synckey) → 下一轮
-        第 5 次原始 read 无 synckey 时熔断(不 fix 不 retry)。
+        第 3 次原始 read 无 synckey 时熔断(不 fix 不 retry)。
         """
         renewal_resp = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
         no_synckey_resp = _mock_response({"succ": 1})
         fix_resp = _mock_response({})
-        # 4 轮(read + fix + retry) + 第 5 轮 read 触发熔断
+        # 2 轮(read + fix + retry) + 第 3 轮 read 触发熔断
         mock_post.side_effect = [
             renewal_resp,
             no_synckey_resp, fix_resp, no_synckey_resp,  # 轮1
             no_synckey_resp, fix_resp, no_synckey_resp,  # 轮2
-            no_synckey_resp, fix_resp, no_synckey_resp,  # 轮3
-            no_synckey_resp, fix_resp, no_synckey_resp,  # 轮4
-            no_synckey_resp,  # 轮5 read 触发熔断
+            no_synckey_resp,  # 轮3 read 触发熔断
         ]
         cfg = _make_cfg(read_num=2)
         client = HttpClient(cookies={"wr_skey": "old"})

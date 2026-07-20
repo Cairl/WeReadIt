@@ -229,12 +229,10 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
                     logger.error(msg)
                     circuit_breaker_triggered = True
                     raise ReadFailedError(msg)
-                logger.warning(
-                    "无 synckey（连续第 %d/%d 次），尝试修复...",
-                    no_synckey_streak, MAX_NO_SYNCKEY,
-                )
+                logger.warning("无 synckey，尝试修复...")
                 fix_no_synckey(client, cfg)
                 no_synckey_fix_triggered += 1
+                logger.info("fix_no_synckey 已调用，重试 read 接口...")
                 # 修复后立即重试一次 read（重新签名，因为 ts/rn 需要更新）
                 # 这样不会丢失本次阅读进度
                 retry_time = int(time.time())
@@ -250,7 +248,7 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
                 )
                 retry_data = retry_response.json()
                 if "synckey" in retry_data:
-                    logger.info("synckey 修复成功（第 %d 次修复），继续阅读", no_synckey_fix_triggered)
+                    logger.info("synckey 修复成功，继续阅读")
                     last_time = retry_time
                     index += 1
                     no_synckey_streak = 0
@@ -259,6 +257,10 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
                     time.sleep(READ_INTERVAL_SECONDS)
                     continue
                 # 重试仍无 synckey，短暂退避后进入下一轮循环
+                logger.warning(
+                    "修复后重试仍无 synckey，退避 %ds 后进入下一轮循环",
+                    CIRCUIT_BREAKER_BACKOFF,
+                )
                 time.sleep(CIRCUIT_BREAKER_BACKOFF)
         else:
             # 无 succ：cookie 过期，清零 synckey 计数
@@ -272,10 +274,7 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
                 logger.error(msg)
                 circuit_breaker_triggered = True
                 raise CookieExpiredError(msg)
-            logger.warning(
-                "cookie 已过期（连续第 %d/%d 次），尝试刷新...",
-                cookie_fail_streak, MAX_COOKIE_FAIL,
-            )
+            logger.warning("cookie 已过期，尝试刷新...")
             refresh_cookie(client, cfg)
             cookie_refresh_count += 1
             time.sleep(CIRCUIT_BREAKER_BACKOFF)
