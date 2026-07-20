@@ -33,7 +33,5 @@ logs/
 .DS_Store
 Thumbs.db
 
-changelog.md
-
 # WorkBuddy workspace (临时计划文件，不入库)
 .workbuddy/
