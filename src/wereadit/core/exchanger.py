@@ -158,25 +158,17 @@ def exchange_awards(
     strategy = _parse_strategy(cfg.exchange_award)
     platform_name = "iOS" if cfg.weread_platform == PLATFORM_IOS else "Android"
 
-    # Token 自动续期（瀑布式，依次尝试）：
-    # 1. login curl 重放（需配置 WEREAD_LOGIN_CURL_BASH，但 skey 刷新请求难抓）
-    # 2. web wr_skey 复用（通过 web renewal 获取 wr_skey 完整值作为 App skey，
-    #    如果 web/App 共享同一 skey 则全自动，无需任何手动操作）
-    # 3. 原 token（降级，几乎必然过期但保留兼容）
-    from wereadit.core.token_refresher import (
-        refresh_app_token,
-        refresh_app_token_via_web,
-    )
+    # Token 自动续期：如果配置了 WEREAD_LOGIN_CURL_BASH，重放 /login 请求刷新 skey
+    # 注意：web wr_skey 不能用于 App 接口（2026-07-21 已证实两套独立体系，
+    # wr_skey 完整长度仅 8 位，与 App skey 不同），已移除该路径
+    from wereadit.core.token_refresher import refresh_app_token
 
-    new_token = None
     if cfg.weread_login_curl:
         new_token = refresh_app_token(cfg.weread_login_curl)
-    if not new_token:
-        new_token = refresh_app_token_via_web(client)
-    if new_token:
-        auth_token = new_token
-    else:
-        logger.warning("Token 自动续期失败（login curl + web wr_skey 均失败），降级使用原 token")
+        if new_token:
+            auth_token = new_token
+        else:
+            logger.warning("Token 刷新失败，降级使用原 token")
 
     # 排查 token 过快过期：记录本次使用的 token 前 8 位，便于对应 GitHub Secrets
     token_preview = auth_token[:8] if auth_token else ""

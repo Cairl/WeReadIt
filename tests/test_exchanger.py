@@ -103,13 +103,7 @@ class TestExchangeAwards:
     @pytest.fixture(autouse=True)
     def _mock_token_refresher(self):
         """mock token refresher 返回 None，避免续期调用消耗 mock_client.post。"""
-        with (
-            patch("wereadit.core.token_refresher.refresh_app_token", return_value=None),
-            patch(
-                "wereadit.core.token_refresher.refresh_app_token_via_web",
-                return_value=None,
-            ),
-        ):
+        with patch("wereadit.core.token_refresher.refresh_app_token", return_value=None):
             yield
 
     def test_missing_vid_returns_error(self, mock_client: MagicMock) -> None:
@@ -210,13 +204,7 @@ class TestExchangeLogging:
     @pytest.fixture(autouse=True)
     def _mock_token_refresher(self):
         """mock token refresher 返回 None，避免续期调用消耗 mock_client.post。"""
-        with (
-            patch("wereadit.core.token_refresher.refresh_app_token", return_value=None),
-            patch(
-                "wereadit.core.token_refresher.refresh_app_token_via_web",
-                return_value=None,
-            ),
-        ):
+        with patch("wereadit.core.token_refresher.refresh_app_token", return_value=None):
             yield
 
     def test_exchange_start_logs_token_preview(
