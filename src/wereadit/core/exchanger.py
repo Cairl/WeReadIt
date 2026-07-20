@@ -254,11 +254,11 @@ def exchange_awards(
             logger.error("兑换 %s 失败（重试 %d 次）", award.award_level_desc, EXCHANGE_MAX_RETRY)
             failed += 1
 
+    logger.info("阅读奖励兑换完成 (%s)", platform_name)
     summary = (
         f"阅读奖励兑换完成 ({platform_name})\n"
         f"本周阅读: {reading_day} 天 / {reading_time / 3600:.1f} 小时\n"
         f"兑换: {exchanged_coin} 书币, {exchanged_card} 天体验卡\n"
         f"跳过: {skipped}, 失败: {failed}"
     )
-    logger.info(summary)
     return summary
