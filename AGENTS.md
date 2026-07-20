@@ -47,10 +47,11 @@ src/wereadit/
 ├── constants.py    # URL、加密盐、默认值、平台常量（带【保活策略】注释）
 ├── core/
 │   ├── reader.py   # 阅读循环 + Cookie 刷新 + 熔断 + fix 后重试
-│   └── exchanger.py # 奖励兑换
+│   ├── exchanger.py # 奖励兑换（兑换前自动刷新 App Token）
+│   └── token_refresher.py # App 端 Token 续期（重放 /login 请求）
 ├── infra/
 │   ├── http.py     # HttpClient（Session 复用 TCP，cookies 业务层独占）
-│   └── curl_parser.py # cURL 命令解析
+│   └── curl_parser.py # cURL 命令解析（parse_curl + parse_curl_full）
 ├── push/           # 推送渠道（策略模式 + @register 注册表）
 │   ├── base.py
 │   ├── registry.py
@@ -70,6 +71,7 @@ src/wereadit/
 - **fix 后重试 read**：`fix_no_synckey` 后立即重试一次 read（重新签名），成功则计入本次进度，不丢失阅读请求。
 - **HttpClient cookies 业务层独占**：`Session` 仅用于 TCP 复用，cookies 存在 `self._cookies` 字典，每次请求显式传 `cookies=`，避免服务器 `Set-Cookie` 自动覆盖业务层 `wr_skey[:8]` 截断。
 - **兑换重试**：指数退避，最多 3 次，token 过期会抛出 `CookieExpiredError` 并推送通知。
+- **兑换 Token 自动续期**：App 端 skey/accessToken 有效期仅约 2 小时，`exchanger.py` 兑换前若配置了 `WEREAD_LOGIN_CURL_BASH`，会调 `token_refresher.refresh_app_token` 重放 `i.weread.qq.com/login` 请求获取新 Token；重放用独立 `requests.post`（不带 web cookie，避免两套认证体系干扰）；响应中 Token 位置未公开，依次从响应体 JSON / 响应 header / Set-Cookie 提取；刷新失败降级用原 Token。
 
 ## Keepalive Strategy
 
@@ -88,6 +90,11 @@ src/wereadit/
 GitHub Actions 定时触发（`deploy.yml`），北京时间每天 00:00 运行。环境变量通过 Secrets/Variables 注入，详见 README。
 
 ## Changelog
+
+### 添加
+
+- **兑换 Token 自动续期**: 新增 `token_refresher.py`，提供两条续期路径：① 重放 App 端 `/login` 请求（需配置 `WEREAD_LOGIN_CURL_BASH`，但 skey 刷新请求难抓）② 通过 web 端 `login/renewal` 获取 `wr_skey` 完整值尝试作为 App skey（全自动，无需手动操作）；`exchanger.py` 兑换前按瀑布式依次尝试两条路径，全失败降级用原 token；`curl_parser.py` 新增 `parse_curl_full` 解析 URL+body。
+- **兑换 Token 过期排查日志**: `exchanger.py` 与 `app.py` 在兑换流程记录 token 前 8 位/平台/HTTP 状态码/errcode/响应体，token 过期告警中明确平台标识与 token 前 8 位，便于对应 GitHub Secrets 定位是自然失效还是风控作废。
 
 ### 修复
 

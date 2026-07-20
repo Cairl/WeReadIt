@@ -92,8 +92,12 @@ def _call_exchange(
     """统一的兑换接口调用，处理 errcode 检查。
 
     查询和兑换共用此函数，由 body 中的字段区分。
+
+    排查日志：失败时打印 HTTP 状态码、errcode、errmsg、响应体片段，
+    用于定位 token 过快过期是自然失效还是风控作废。
     """
     headers = _build_headers(auth_token, vid, platform)
+    logger.debug("兑换请求 body: %s", body)
     response = client.post(
         EXCHANGE_URL,
         json=body,
@@ -104,6 +108,15 @@ def _call_exchange(
     if response.status_code != 200 or "errcode" in data:
         errcode = data.get("errcode", "unknown")
         errmsg = data.get("errmsg", "unknown")
+        # 排查 token 过快过期：记录完整失败信息（响应体截断到 500 字符避免刷屏）
+        logger.warning(
+            "兑换接口失败: HTTP=%s, errcode=%s, errmsg=%s, token=%s..., 响应体=%s",
+            response.status_code,
+            errcode,
+            errmsg,
+            auth_token[:8] if auth_token else "",
+            str(data)[:500],
+        )
         raise ExchangeError(
             f"兑换接口失败: HTTP {response.status_code}, errcode={errcode}, errmsg={errmsg}",
             errcode if isinstance(errcode, int) else None,
@@ -144,7 +157,33 @@ def exchange_awards(
 
     strategy = _parse_strategy(cfg.exchange_award)
     platform_name = "iOS" if cfg.weread_platform == PLATFORM_IOS else "Android"
-    logger.info("兑换平台: %s", platform_name)
+
+    # Token 自动续期（瀑布式，依次尝试）：
+    # 1. login curl 重放（需配置 WEREAD_LOGIN_CURL_BASH，但 skey 刷新请求难抓）
+    # 2. web wr_skey 复用（通过 web renewal 获取 wr_skey 完整值作为 App skey，
+    #    如果 web/App 共享同一 skey 则全自动，无需任何手动操作）
+    # 3. 原 token（降级，几乎必然过期但保留兼容）
+    from wereadit.core.token_refresher import (
+        refresh_app_token,
+        refresh_app_token_via_web,
+    )
+
+    new_token = None
+    if cfg.weread_login_curl:
+        new_token = refresh_app_token(cfg.weread_login_curl)
+    if not new_token:
+        new_token = refresh_app_token_via_web(client)
+    if new_token:
+        auth_token = new_token
+    else:
+        logger.warning("Token 自动续期失败（login curl + web wr_skey 均失败），降级使用原 token")
+
+    # 排查 token 过快过期：记录本次使用的 token 前 8 位，便于对应 GitHub Secrets
+    token_preview = auth_token[:8] if auth_token else ""
+    logger.info(
+        "兑换开始: 平台=%s, vid=%s, token=%s...",
+        platform_name, vid, token_preview,
+    )
 
     # 查询
     query_body = {
@@ -161,6 +200,10 @@ def exchange_awards(
         award_data = _call_exchange(client, auth_token, vid, cfg.weread_platform, query_body)
     except ExchangeError as exc:
         if exc.errcode == ERRCODE_TOKEN_EXPIRED:
+            logger.warning(
+                "查询奖励时 Token 已过期 (errcode=%s), token=%s..., 请重新抓包更新 Secret",
+                exc.errcode, token_preview,
+            )
             raise
         logger.error("查询奖励失败: %s", exc)
         return f"兑换奖励失败: {exc}"
@@ -229,6 +272,10 @@ def exchange_awards(
                 break
             except ExchangeError as exc:
                 if exc.errcode == ERRCODE_TOKEN_EXPIRED:
+                    logger.warning(
+                        "兑换 %s 时 Token 已过期 (errcode=%s), token=%s..., 请重新抓包更新 Secret",
+                        award.award_level_desc, exc.errcode, token_preview,
+                    )
                     raise
                 logger.warning(
                     "兑换 %s 第 %d/%d 次失败: %s",

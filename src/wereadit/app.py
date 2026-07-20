@@ -12,7 +12,7 @@ import logging
 import traceback
 
 from wereadit.config import load_config
-from wereadit.constants import ERRCODE_TOKEN_EXPIRED
+from wereadit.constants import ERRCODE_TOKEN_EXPIRED, PLATFORM_IOS
 from wereadit.exceptions import CookieExpiredError, ExchangeError, ReadFailedError
 from wereadit.infra.http import HttpClient
 from wereadit.push import push
@@ -57,10 +57,19 @@ def main() -> int:
                 exchange_summary = exchange_awards(client, cfg)
             except ExchangeError as exc:
                 if exc.errcode == ERRCODE_TOKEN_EXPIRED:
+                    # 排查 token 过快过期：告警中明确平台 + token 前 8 位，
+                    # 便于用户对应 GitHub Secrets 并追踪是否为同一 token 反复过期
+                    token_preview = cfg.weread_access_token[:8] if cfg.weread_access_token else ""
+                    platform_label = (
+                        "iOS (WEREAD_IOS_TOKEN)"
+                        if cfg.weread_platform == PLATFORM_IOS
+                        else "Android (WEREAD_ANDROID_TOKEN)"
+                    )
                     logger.error("兑换 Token 已过期: %s", exc)
                     exchange_summary = (
-                        "兑换奖励失败: WEREAD_ANDROID_TOKEN / WEREAD_IOS_TOKEN 已过期，"
-                        "请重新抓包更新 Secret 中的 Token。"
+                        f"兑换奖励失败: {platform_label} 已过期，"
+                        f"请重新抓包更新 Secret 中的 Token。\n"
+                        f"过期 Token 前 8 位: {token_preview}..."
                     )
                     exit_code = 1
                     has_failure = True

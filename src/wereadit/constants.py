@@ -13,6 +13,9 @@ FIX_SYNCKEY_URL = "https://weread.qq.com/web/book/chapterInfos"
 # 兑换接口
 EXCHANGE_URL = "https://i.weread.qq.com/weekly/exchange"
 
+# App 端 /login 接口超时（用于刷新 skey/accessToken，实现兑换 Token 自动续期）
+LOGIN_TIMEOUT = 15
+
 # 【保活策略 - SIGN_KEY 不能改】
 # 用于 sg 字段签名: sg = sha256(ts + rn + SIGN_KEY)
 # 逆向自微信读书 web 端 JS,服务器据此验证请求合法性

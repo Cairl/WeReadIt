@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import logging
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -99,6 +100,18 @@ class TestParseStrategy:
 
 
 class TestExchangeAwards:
+    @pytest.fixture(autouse=True)
+    def _mock_token_refresher(self):
+        """mock token refresher 返回 None，避免续期调用消耗 mock_client.post。"""
+        with (
+            patch("wereadit.core.token_refresher.refresh_app_token", return_value=None),
+            patch(
+                "wereadit.core.token_refresher.refresh_app_token_via_web",
+                return_value=None,
+            ),
+        ):
+            yield
+
     def test_missing_vid_returns_error(self, mock_client: MagicMock) -> None:
         cfg = _make_cfg(cookies={})
         result = exchange_awards(mock_client, cfg)
@@ -183,3 +196,95 @@ class TestExchangeAwards:
         _, kwargs = mock_client.post.call_args
         assert "skey" in kwargs["headers"]
         assert "accessToken" not in kwargs["headers"]
+
+
+class TestExchangeLogging:
+    """排查 token 过快过期：验证兑换流程的关键日志输出。
+
+    覆盖 2026-07-21 新增的排查日志：
+    - 兑换开始时记录 token 前 8 位、平台、vid
+    - Token 过期时记录 WARNING 日志，包含 token 前 8 位
+    - 兑换接口失败时记录 HTTP 状态码、errcode、errmsg、响应体片段
+    """
+
+    @pytest.fixture(autouse=True)
+    def _mock_token_refresher(self):
+        """mock token refresher 返回 None，避免续期调用消耗 mock_client.post。"""
+        with (
+            patch("wereadit.core.token_refresher.refresh_app_token", return_value=None),
+            patch(
+                "wereadit.core.token_refresher.refresh_app_token_via_web",
+                return_value=None,
+            ),
+        ):
+            yield
+
+    def test_exchange_start_logs_token_preview(
+        self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """兑换开始时应记录 token 前 8 位、平台、vid。"""
+        cfg = _make_cfg(weread_android_token="abcdefgh1234567890")
+        query_resp = _mock_award_data()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = query_resp
+        mock_client.post.return_value = mock_response
+
+        with caplog.at_level(logging.INFO, logger="wereadit.core.exchanger"):
+            exchange_awards(mock_client, cfg)
+
+        # 验证 INFO 日志中包含 token 前 8 位、平台、vid
+        assert "abcdefgh" in caplog.text
+        assert "Android" in caplog.text
+        assert "12345" in caplog.text
+        # 完整 token 不应出现在日志中（脱敏）
+        assert "abcdefgh1234567890" not in caplog.text
+
+    def test_token_expired_logs_warning_with_preview(
+        self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Token 过期时应记录 WARNING 级别日志，包含 token 前 8 位。"""
+        cfg = _make_cfg(weread_android_token="abcdefgh1234567890")
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "errcode": ERRCODE_TOKEN_EXPIRED,
+            "errmsg": "登录超时",
+        }
+        mock_client.post.return_value = mock_response
+
+        with caplog.at_level(logging.WARNING, logger="wereadit.core.exchanger"):
+            with pytest.raises(ExchangeError):
+                exchange_awards(mock_client, cfg)
+
+        # 验证 WARNING 日志中包含 token 前 8 位和 "Token 已过期"
+        warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("abcdefgh" in m for m in warning_messages)
+        assert any("Token 已过期" in m for m in warning_messages)
+        # 完整 token 不应出现在日志中（脱敏）
+        assert "abcdefgh1234567890" not in caplog.text
+
+    def test_call_exchange_failure_logs_details(
+        self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """兑换接口失败时应记录 HTTP 状态码、errcode、errmsg、响应体片段。"""
+        cfg = _make_cfg()
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+        mock_response.json.return_value = {
+            "errcode": -999,
+            "errmsg": "风控拦截",
+            "extra": "detail",
+        }
+        mock_client.post.return_value = mock_response
+
+        with caplog.at_level(logging.WARNING, logger="wereadit.core.exchanger"):
+            result = exchange_awards(mock_client, cfg)
+
+        # 非 token 过期错误应返回字符串而非 raise
+        assert "兑换奖励失败" in result
+        # 验证 WARNING 日志中包含 HTTP 状态码、errcode、errmsg
+        warning_text = caplog.text
+        assert "403" in warning_text
+        assert "-999" in warning_text
+        assert "风控拦截" in warning_text

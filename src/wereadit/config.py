@@ -90,6 +90,7 @@ class Config:
     exchange_award: str = DEFAULT_EXCHANGE_AWARD
     weread_android_token: str = ""
     weread_ios_token: str = ""
+    weread_login_curl: str = ""
 
     # HTTP 请求参数
     headers: dict[str, str] = field(default_factory=dict)
@@ -175,6 +176,7 @@ def load_config() -> Config:
         serverchan_spt=_env_renamed("SERVERCHAN", "SERVERCHAN_SPT"),
         weread_android_token=_env("WEREAD_ANDROID_TOKEN"),
         weread_ios_token=_env("WEREAD_IOS_TOKEN"),
+        weread_login_curl=_env("WEREAD_LOGIN_CURL_BASH"),
         exchange_award=_env("EXCHANGE_AWARD", DEFAULT_EXCHANGE_AWARD),
         headers=headers,
         cookies=cookies,
