@@ -158,7 +158,7 @@ def exchange_awards(
     strategy = _parse_strategy(cfg.exchange_award)
     platform_name = "iOS" if cfg.weread_platform == PLATFORM_IOS else "Android"
 
-    # Token 自动续期：如果配置了 WEREAD_LOGIN_CURL_BASH，重放 /login 请求刷新 skey
+    # Token 自动续期：如果配置了 WEREAD_LOGIN_CURL，重放 /login 请求刷新 skey
     # 注意：web wr_skey 不能用于 App 接口（2026-07-21 已证实两套独立体系，
     # wr_skey 完整长度仅 8 位，与 App skey 不同），已移除该路径
     from wereadit.core.token_refresher import refresh_app_token

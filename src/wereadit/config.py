@@ -176,7 +176,7 @@ def load_config() -> Config:
         serverchan_spt=_env_renamed("SERVERCHAN", "SERVERCHAN_SPT"),
         weread_android_token=_env("WEREAD_ANDROID_TOKEN"),
         weread_ios_token=_env("WEREAD_IOS_TOKEN"),
-        weread_login_curl=_env("WEREAD_LOGIN_CURL_BASH"),
+        weread_login_curl=_env("WEREAD_LOGIN_CURL"),
         exchange_award=_env("EXCHANGE_AWARD", DEFAULT_EXCHANGE_AWARD),
         headers=headers,
         cookies=cookies,

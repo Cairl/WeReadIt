@@ -51,7 +51,7 @@ jobs:
         SERVERCHAN: ${{ secrets.SERVERCHAN }}
         WEREAD_ANDROID_TOKEN: ${{ secrets.WEREAD_ANDROID_TOKEN }}
         WEREAD_IOS_TOKEN: ${{ secrets.WEREAD_IOS_TOKEN }}
-        WEREAD_LOGIN_CURL_BASH: ${{ secrets.WEREAD_LOGIN_CURL_BASH }}
+        WEREAD_LOGIN_CURL: ${{ secrets.WEREAD_LOGIN_CURL }}
         READ_NUM: ${{ vars.READ_NUM }}
         EXCHANGE_AWARD: ${{ vars.EXCHANGE_AWARD }}
 

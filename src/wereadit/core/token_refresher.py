@@ -4,7 +4,7 @@
 本模块提供两种自动续期路径，exchanger.py 按瀑布式依次尝试：
 
 1. **login curl 重放**（refresh_app_token）：用户抓包 App 的 /login 请求，
-   脚本重放获取新 skey。需要用户手动抓包配置 WEREAD_LOGIN_CURL_BASH。
+   脚本重放获取新 skey。需要用户手动抓包配置 WEREAD_LOGIN_CURL。
 2. **web wr_skey 复用**（refresh_app_token_via_web）：通过 web 端 login/renewal
    接口获取 wr_skey 完整值，尝试作为 App skey。如果 web wr_skey 和 App skey
    是同一个值（只是 cookie vs header 传输方式不同），则可实现全自动续期，

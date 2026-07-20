@@ -35,7 +35,7 @@ POST https://weread.qq.com/web/book/read
 | `WEREAD_CURL_BASH`     | Secret   | 必填 | -                   | 第 1 步复制的 cURL 命令                        |
 | `WEREAD_ANDROID_TOKEN` | Secret   | 选填 | -                   | Android `accessToken`，用于兑换奖励             |
 | `WEREAD_IOS_TOKEN`     | Secret   | 选填 | -                   | iOS `skey`，用于兑换奖励                        |
-| `WEREAD_LOGIN_CURL_BASH` | Secret | 选填 | -                   | App 端 `/login` 请求 cURL，用于 Token 自动续期（推荐配置） |
+| `WEREAD_LOGIN_CURL` | Secret | 选填 | -                   | App 端 `/login` 请求 cURL，用于 Token 自动续期（推荐配置） |
 | `READ_NUM`             | Variable | 选填 | `120`               | 阅读次数（120 次 ≈ 60 分钟）                   |
 | `EXCHANGE_AWARD`       | Variable | 选填 | `2,2,2,2,2,2,2,2`  | 兑换策略：`0`=不兑换，`1`=体验卡，`2`=书币     |
 
@@ -84,7 +84,7 @@ App 端 Token 有效期极短（约 2 小时），不配置自动续期几乎必
 
 1. 用抓包工具捕获 App 端 `i.weread.qq.com/login` 请求（在 App 中操作触发 Token 刷新，或等待 2 小时后重新打开 App）。
 2. 将该请求复制为 cURL (Bash) 格式。
-3. 配置到 Secret `WEREAD_LOGIN_CURL_BASH`。
+3. 配置到 Secret `WEREAD_LOGIN_CURL`。
 
 配置后，脚本每次兑换前会自动重放 `/login` 请求刷新 Token，无需再手动更新 `WEREAD_ANDROID_TOKEN` / `WEREAD_IOS_TOKEN`。若刷新失败，会降级使用原 Token 并记录告警日志。
 
