@@ -152,6 +152,21 @@ class TestExchangeAwards:
             exchange_awards(mock_client, cfg)
         assert exc_info.value.errcode == ERRCODE_TOKEN_EXPIRED
 
+    def test_query_other_exchange_error_returns_string(self, mock_client: MagicMock) -> None:
+        """查询抛非 Token 过期的 ExchangeError 时返回错误字符串，不 re-raise。"""
+        cfg = _make_cfg()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "errcode": -999,
+            "errmsg": "查询失败",
+        }
+        mock_client.post.return_value = mock_response
+
+        result = exchange_awards(mock_client, cfg)
+        assert "兑换奖励失败" in result
+        assert "-999" in result
+
     def test_ios_platform(self, mock_client: MagicMock) -> None:
         """iOS 平台应使用 skey header。"""
         # 通过 weread_ios_token 触发 weread_platform=PLATFORM_IOS
