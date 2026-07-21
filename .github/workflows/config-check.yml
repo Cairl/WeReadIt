@@ -1,0 +1,42 @@
+name: WeReadIt 配置检查
+
+on:
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    environment: AutoRead  # 与主 workflow 同一环境，读取相同 Secrets
+
+    steps:
+
+    - name: Set DNS to Google's DNS
+      run: |
+        echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
+        echo "nameserver 8.8.4.4" | sudo tee -a /etc/resolv.conf
+
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run config check
+      env:
+        WEREAD_WEB_CURL: ${{ secrets.WEREAD_WEB_CURL }}
+        WEREAD_APP_CURL: ${{ secrets.WEREAD_APP_CURL }}
+        PUSHPLUS: ${{ secrets.PUSHPLUS }}
+        WXPUSHER: ${{ secrets.WXPUSHER }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        SERVERCHAN: ${{ secrets.SERVERCHAN }}
+        READ_NUM: ${{ vars.READ_NUM }}
+        EXCHANGE_AWARD: ${{ vars.EXCHANGE_AWARD }}
+      run: python -m wereadit.config_check
