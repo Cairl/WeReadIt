@@ -191,7 +191,7 @@ class TestMainTokenRefresh:
         assert used_cfg.app_token_key == "skey"
         assert used_cfg.weread_platform == PLATFORM_IOS
         push_content = mock_push.call_args.args[0]
-        assert "平台自识别：iOS（依据响应字段 skey）" in push_content
+        assert "平台自识别：iOS" in push_content
 
     def test_exchange_receives_refresher_args(self) -> None:
         """exchange_awards 收到 refresher 回调与刷新时刻。"""

@@ -75,7 +75,6 @@ def main() -> int:
                     token_refreshed_at = time.time()
                     platform_note = (
                         f"平台自识别：{'iOS' if cfg.weread_platform == PLATFORM_IOS else 'Android'}"
-                        f"（依据响应字段 {refresh_result.token_key}）"
                     )
                     logger.info(
                         "兑换 Token 已在阅读前刷新: %s...（%s）",
