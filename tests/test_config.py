@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+import pytest
 
 from wereadit.config import Config, load_config
 from wereadit.constants import PLATFORM_ANDROID, PLATFORM_IOS
@@ -11,34 +11,35 @@ from wereadit.constants import PLATFORM_ANDROID, PLATFORM_IOS
 class TestLoadConfigEnvNames:
     """环境变量新名读取（无旧名兼容）。"""
 
-    def test_web_curl_read(self) -> None:
-        env = {
-            "WEREAD_WEB_CURL": (
-                "curl 'https://weread.qq.com/web/book/read' "
-                "-H 'Cookie: wr_skey=abc12345; wr_vid=12345'"
-            )
-        }
-        with patch.dict("os.environ", env, clear=True):
-            cfg = load_config()
+    def test_web_curl_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(
+            "WEREAD_WEB_CURL",
+            "curl 'https://weread.qq.com/web/book/read' "
+            "-H 'Cookie: wr_skey=abc12345; wr_vid=12345'",
+        )
+        cfg = load_config()
         assert cfg.web_curl.startswith("curl")
         assert cfg.cookies["wr_vid"] == "12345"
 
-    def test_app_curl_read(self) -> None:
-        env = {"WEREAD_APP_CURL": "curl 'https://i.weread.qq.com/login'"}
-        with patch.dict("os.environ", env, clear=True):
-            cfg = load_config()
+    def test_app_curl_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(
+            "WEREAD_APP_CURL", "curl 'https://i.weread.qq.com/login'"
+        )
+        cfg = load_config()
         assert cfg.weread_app_curl == "curl 'https://i.weread.qq.com/login'"
 
-    def test_old_names_ignored(self) -> None:
+    def test_old_names_ignored(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """旧名 WEREAD_CURL_BASH / WEREAD_LOGIN_CURL 不再读取。"""
-        env = {
-            "WEREAD_CURL_BASH": (
-                "curl 'https://weread.qq.com/web/book/read' -H 'Cookie: wr_vid=1'"
-            ),
-            "WEREAD_LOGIN_CURL": "curl 'https://i.weread.qq.com/login'",
-        }
-        with patch.dict("os.environ", env, clear=True):
-            cfg = load_config()
+        monkeypatch.setenv(
+            "WEREAD_CURL_BASH",
+            "curl 'https://weread.qq.com/web/book/read' -H 'Cookie: wr_vid=1'",
+        )
+        monkeypatch.setenv(
+            "WEREAD_LOGIN_CURL", "curl 'https://i.weread.qq.com/login'"
+        )
+        monkeypatch.delenv("WEREAD_WEB_CURL", raising=False)
+        monkeypatch.delenv("WEREAD_APP_CURL", raising=False)
+        cfg = load_config()
         assert cfg.web_curl == ""
         assert cfg.weread_app_curl == ""
 

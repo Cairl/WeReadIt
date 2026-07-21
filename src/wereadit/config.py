@@ -154,7 +154,7 @@ def load_config() -> Config:
     else:
         logger.warning(
             "未配置 WEREAD_WEB_CURL，使用默认 cookies 模板。"
-            "生产环境必须配置自己的 curl_bash，否则请求会被服务器拒绝。"
+            "生产环境必须配置自己的 web_curl，否则请求会被服务器拒绝。"
             "本地调试可参考 README.md 抓包步骤。"
         )
         headers, cookies = dict(DEFAULT_HEADERS), dict(DEFAULT_COOKIES)
