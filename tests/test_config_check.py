@@ -103,3 +103,12 @@ class TestConfigCheck:
         exit_code, mock_push = _run(cfg)
         assert exit_code == 1  # 无推送渠道计为异常项
         mock_push.assert_not_called()
+
+    def test_app_curl_android_platform(self) -> None:
+        """token_key=accessToken 时报告平台自识别为 Android。"""
+        cfg = _make_cfg()
+        exit_code, mock_push = _run(
+            cfg, RefreshResult(token="at_12345678", token_key="accessToken")
+        )
+        assert exit_code == 0
+        assert "平台自识别为 Android" in mock_push.call_args.args[0]

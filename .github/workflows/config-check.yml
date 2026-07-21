@@ -39,4 +39,5 @@ jobs:
         SERVERCHAN: ${{ secrets.SERVERCHAN }}
         READ_NUM: ${{ vars.READ_NUM }}
         EXCHANGE_AWARD: ${{ vars.EXCHANGE_AWARD }}
+        PYTHONPATH: src
       run: python -m wereadit.config_check
