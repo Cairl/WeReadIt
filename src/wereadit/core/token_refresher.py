@@ -146,7 +146,7 @@ def diagnose_login_curl(login_curl: str) -> str:
     3. body 含 deviceId（长效设备凭证，是 /login 换新 token 的依据）
     """
     if not login_curl.strip():
-        return "WEREAD_APP_CURL 为空，请按 README「Token 自动续期」一节配置"
+        return "WEREAD_APP_CURL 为空，请按 README「第 2 步：配置 WEREAD_APP_CURL」配置"
 
     url, _, _, body = parse_curl_full(login_curl)
     if not url:
