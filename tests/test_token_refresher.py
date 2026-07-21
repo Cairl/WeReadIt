@@ -12,7 +12,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+import requests
 
 from wereadit.core.token_refresher import (
     RefreshResult,
@@ -20,6 +22,7 @@ from wereadit.core.token_refresher import (
     _find_token_in_json,
     _summarize_structure,
     diagnose_login_curl,
+    refresh_app_token,
 )
 from wereadit.infra.curl_parser import parse_curl_full
 
@@ -240,3 +243,154 @@ class TestDiagnoseLoginCurl:
         diagnosis = diagnose_login_curl(curl)
         assert "deviceId" in diagnosis
         assert "冷启动" in diagnosis
+
+
+class TestRefreshAppToken:
+    """refresh_app_token 重放 /login 请求刷新 token，返回 RefreshResult。"""
+
+    _LOGIN_CURL = (
+        "curl 'https://i.weread.qq.com/login' "
+        "-H 'vid: 12345' "
+        "--data-raw '{\"deviceId\":\"dev1\"}'"
+    )
+
+    @patch("wereadit.core.token_refresher.requests.post")
+    def test_success_from_json(self, mock_post: MagicMock) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"skey": "fresh_skey_abc"}
+        mock_post.return_value = mock_response
+
+        result = refresh_app_token(self._LOGIN_CURL)
+        assert result.ok is True
+        assert result.token == "fresh_skey_abc"
+        assert result.token_key == "skey"
+        assert result.diagnosis == ""
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args
+        assert call_kwargs.args[0] == "https://i.weread.qq.com/login"
+        assert call_kwargs.kwargs["data"] == '{"deviceId":"dev1"}'
+
+    @patch("wereadit.core.token_refresher.requests.post")
+    def test_success_from_nested_json(self, mock_post: MagicMock) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"errcode": 0, "data": {"accessToken": "nested_at"}}
+        mock_post.return_value = mock_response
+
+        result = refresh_app_token(self._LOGIN_CURL)
+        assert result.ok is True
+        assert result.token == "nested_at"
+        assert result.token_key == "accessToken"
+
+    @patch("wereadit.core.token_refresher.requests.post")
+    def test_success_from_header(self, mock_post: MagicMock) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.side_effect = ValueError()
+        mock_response.headers = {"skey": "header_fresh_skey"}
+        mock_post.return_value = mock_response
+
+        result = refresh_app_token(self._LOGIN_CURL)
+        assert result.ok is True
+        assert result.token == "header_fresh_skey"
+
+    @patch("wereadit.core.token_refresher.requests.post")
+    def test_errcode_rejected_no_retry(self, mock_post: MagicMock) -> None:
+        """响应 errcode 非 0：凭证失效，不重试。"""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"errcode": -2012, "errmsg": "登录超时"}
+        mock_response.headers = {}
+        mock_post.return_value = mock_response
+
+        result = refresh_app_token(self._LOGIN_CURL)
+        assert result.ok is False
+        assert "-2012" in result.diagnosis
+        assert "重新抓包" in result.diagnosis
+        mock_post.assert_called_once()
+
+    @patch("wereadit.core.token_refresher.requests.post")
+    def test_http_4xx_rejected_no_retry(self, mock_post: MagicMock) -> None:
+        """HTTP 4xx：服务端拒绝，不重试。"""
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_response.text = "unauthorized"
+        mock_post.return_value = mock_response
+
+        result = refresh_app_token(self._LOGIN_CURL)
+        assert result.ok is False
+        assert "401" in result.diagnosis
+        assert "重新抓包" in result.diagnosis
+        mock_post.assert_called_once()
+
+    @patch("wereadit.core.token_refresher.requests.post")
+    def test_unknown_structure_diagnosis(self, mock_post: MagicMock) -> None:
+        """200 但递归提取不到 token：诊断含响应结构摘要。"""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": {"user": {"name": "x"}}}
+        mock_response.headers = {}
+        mock_post.return_value = mock_response
+
+        result = refresh_app_token(self._LOGIN_CURL)
+        assert result.ok is False
+        assert "未找到 token" in result.diagnosis
+        assert "data.user.name:str" in result.diagnosis
+        # 脱敏：具体值不出现
+        assert '"x"' not in result.diagnosis
+
+    @patch("wereadit.core.token_refresher.time.sleep")
+    @patch("wereadit.core.token_refresher.requests.post")
+    def test_network_retry_then_success(
+        self, mock_post: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        """首次网络异常，退避后第二次成功。"""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"skey": "retry_skey"}
+        mock_post.side_effect = [requests.RequestException("timeout"), mock_response]
+
+        result = refresh_app_token(self._LOGIN_CURL)
+        assert result.ok is True
+        assert result.token == "retry_skey"
+        assert mock_post.call_count == 2
+        mock_sleep.assert_called_once_with(5)
+
+    @patch("wereadit.core.token_refresher.time.sleep")
+    @patch("wereadit.core.token_refresher.requests.post")
+    def test_network_all_attempts_fail(
+        self, mock_post: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        """三次均网络异常：诊断含网络异常说明，退避间隔 5s/10s。"""
+        mock_post.side_effect = requests.RequestException("timeout")
+
+        result = refresh_app_token(self._LOGIN_CURL)
+        assert result.ok is False
+        assert "网络异常" in result.diagnosis
+        assert "明日自动重试" in result.diagnosis
+        assert mock_post.call_count == 3
+        assert [c.args[0] for c in mock_sleep.call_args_list] == [5, 10]
+
+    @patch("wereadit.core.token_refresher.time.sleep")
+    @patch("wereadit.core.token_refresher.requests.post")
+    def test_http_5xx_retried(
+        self, mock_post: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        """HTTP 5xx 视同网络类，退避重试后成功。"""
+        mock_500 = MagicMock()
+        mock_500.status_code = 500
+        mock_ok = MagicMock()
+        mock_ok.status_code = 200
+        mock_ok.json.return_value = {"skey": "after_500"}
+        mock_post.side_effect = [mock_500, mock_ok]
+
+        result = refresh_app_token(self._LOGIN_CURL)
+        assert result.ok is True
+        assert result.token == "after_500"
+        assert mock_post.call_count == 2
+
+    def test_invalid_curl_no_url(self) -> None:
+        result = refresh_app_token("curl -H 'vid: 12345'")
+        assert result.ok is False
+        assert "URL" in result.diagnosis

@@ -18,15 +18,14 @@
 
 from __future__ import annotations
 
-import json
 import logging
+import time
 from dataclasses import dataclass
 
 import requests
 
-from wereadit.constants import COOKIE_DATA_VARIANTS, LOGIN_TIMEOUT, RENEW_TIMEOUT, RENEW_URL
+from wereadit.constants import LOGIN_MAX_ATTEMPTS, LOGIN_RETRY_INTERVAL, LOGIN_TIMEOUT
 from wereadit.infra.curl_parser import parse_curl_full
-from wereadit.infra.http import HttpClient
 
 logger = logging.getLogger(__name__)
 
@@ -169,84 +168,116 @@ def diagnose_login_curl(login_curl: str) -> str:
     return ""
 
 
-def refresh_app_token(login_curl: str) -> str | None:
+def refresh_app_token(login_curl: str) -> RefreshResult:
     """重放 /login 请求刷新 App 端 skey/accessToken。
 
     用户抓包 App 的 /login 请求（i.weread.qq.com/login），配置为环境变量。
     脚本重放该请求，从响应中提取新的 skey/accessToken。
 
+    错误四分类：
+    - 配置错误（解析不出 URL）：不重试
+    - 网络错误（异常 / HTTP 5xx）：指数退避重试（最多 LOGIN_MAX_ATTEMPTS 次）
+    - 服务端拒绝（HTTP 4xx / errcode 非 0）：不重试，指引重新抓包
+    - 结构未知（200 但提取不到 token）：不重试，诊断含响应结构摘要
+
     Args:
         login_curl: /login 请求的 cURL 命令（抓包工具「复制为 Bash」）
 
     Returns:
-        新的 skey/accessToken，或 None（刷新失败）
+        RefreshResult：成功含新 token 与命中字段名；失败含人话诊断
     """
     url, headers, cookies, body = parse_curl_full(login_curl)
     if not url:
-        logger.error("login curl 解析失败：未找到 URL")
-        return RefreshResult()
+        return RefreshResult(
+            diagnosis="login curl 解析失败：未找到 URL，请检查 WEREAD_LOGIN_CURL 是否为完整 cURL 命令"
+        )
 
     logger.info("刷新 App Token: POST %s", url)
-    try:
-        response = requests.post(
-            url,
-            data=body if body else None,
-            headers=headers,
-            cookies=cookies,
-            timeout=LOGIN_TIMEOUT,
-        )
-    except requests.RequestException as exc:
-        logger.warning("刷新 App Token 请求失败: %s", exc)
-        return RefreshResult()
-
-    new_token, _ = _extract_token_from_response(response)
-    if new_token:
-        logger.info("App Token 刷新成功, 新 token=%s...", new_token[:8])
-    else:
-        logger.warning(
-            "App Token 刷新失败: 响应中未找到 skey/accessToken, HTTP=%s, 响应体=%s",
-            response.status_code,
-            response.text[:500],
-        )
-    return RefreshResult(token=new_token) if new_token else RefreshResult()
-
-
-def refresh_app_token_via_web(client: HttpClient) -> str | None:
-    """通过 web 端 renewal 接口获取 wr_skey 完整值，尝试作为 App skey。
-
-    web 端 wr_skey 可通过 login/renewal 自动刷新（reader.py 已实现）。
-    如果 wr_skey 完整值与 App 端 skey 是同一个值（只是 cookie vs header
-    传输方式不同），则可实现全自动续期，无需手动抓包 App token。
-
-    注意：reader.py 中 wr_skey 被截断到 8 位用于 web 接口（保活策略），
-    这里获取 renewal 响应中的完整值用于 App 接口尝试。
-
-    Args:
-        client: HTTP 客户端（带 web cookie，用于调用 renewal 接口）
-
-    Returns:
-        wr_skey 完整值，或 None（刷新失败）
-    """
-    logger.info("尝试用 web wr_skey 作为 App skey")
-    for cookie_data in COOKIE_DATA_VARIANTS:
+    last_network_error = ""
+    for attempt in range(LOGIN_MAX_ATTEMPTS):
         try:
-            response = client.post(
-                RENEW_URL,
-                data=json.dumps(cookie_data, separators=(",", ":")),
-                timeout=RENEW_TIMEOUT,
+            response = requests.post(
+                url,
+                data=body if body else None,
+                headers=headers,
+                cookies=cookies,
+                timeout=LOGIN_TIMEOUT,
             )
-            # 获取 wr_skey 完整值（不截断）
-            if "wr_skey" in response.cookies:
-                full_skey = response.cookies["wr_skey"]
-                logger.info(
-                    "web renewal 返回 wr_skey, 完整长度=%d, 前8位=%s...",
-                    len(full_skey),
-                    full_skey[:8],
-                )
-                return full_skey
         except requests.RequestException as exc:
-            logger.warning("web renewal 请求失败: %s", exc)
+            last_network_error = str(exc)
+            logger.warning(
+                "刷新 App Token 网络异常（第 %d/%d 次）: %s",
+                attempt + 1,
+                LOGIN_MAX_ATTEMPTS,
+                exc,
+            )
+            if attempt < LOGIN_MAX_ATTEMPTS - 1:
+                time.sleep(LOGIN_RETRY_INTERVAL * (2**attempt))
             continue
 
-    logger.warning("web renewal 未返回 wr_skey，无法尝试 web skey 续期")
-    return None
+        if response.status_code >= 500:
+            last_network_error = f"HTTP {response.status_code}"
+            logger.warning(
+                "刷新 App Token 服务端错误（第 %d/%d 次）: HTTP %s",
+                attempt + 1,
+                LOGIN_MAX_ATTEMPTS,
+                response.status_code,
+            )
+            if attempt < LOGIN_MAX_ATTEMPTS - 1:
+                time.sleep(LOGIN_RETRY_INTERVAL * (2**attempt))
+            continue
+
+        if response.status_code >= 400:
+            logger.warning(
+                "刷新 App Token 被服务端拒绝: HTTP %s, 响应体=%s",
+                response.status_code,
+                response.text[:500],
+            )
+            return RefreshResult(
+                diagnosis=(
+                    f"login 凭证已被服务端拒绝 (HTTP {response.status_code})，"
+                    "请重新抓包更新 WEREAD_LOGIN_CURL"
+                )
+            )
+
+        # 检查 errcode（weread 约定 errcode==0 或缺失为成功）
+        try:
+            data = response.json()
+        except ValueError:
+            data = None
+        if isinstance(data, dict):
+            errcode = data.get("errcode")
+            if errcode not in (None, 0):
+                errmsg = data.get("errmsg", "unknown")
+                logger.warning(
+                    "刷新 App Token 失败: errcode=%s, errmsg=%s", errcode, errmsg
+                )
+                return RefreshResult(
+                    diagnosis=(
+                        f"login 凭证已失效 (errcode={errcode}, {errmsg})，"
+                        "请重新抓包更新 WEREAD_LOGIN_CURL"
+                    )
+                )
+
+        token, token_key = _extract_token_from_response(response)
+        if token:
+            logger.info(
+                "App Token 刷新成功, 字段=%s, 新 token=%s...", token_key, token[:8]
+            )
+            return RefreshResult(token=token, token_key=token_key)
+
+        structure = _summarize_structure(data)
+        logger.warning("刷新 App Token: 响应 200 但未找到 token, 结构=%s", structure)
+        return RefreshResult(
+            diagnosis=(
+                f"/login 响应 200 但未找到 token，响应结构: {structure}。"
+                "请把此信息反馈给开发者适配新的响应格式"
+            )
+        )
+
+    return RefreshResult(
+        diagnosis=(
+            f"刷新 App Token 网络异常（重试 {LOGIN_MAX_ATTEMPTS} 次均失败）: {last_network_error}。"
+            "本次为网络问题，明日自动重试"
+        )
+    )
