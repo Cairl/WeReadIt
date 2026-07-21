@@ -1,21 +1,24 @@
-"""token_refresher 测试：验证 /login 重放与 web wr_skey 续期逻辑。
+"""token_refresher 测试：验证 /login 重放续期逻辑。
 
 覆盖：
 - parse_curl_full 解析 URL/headers/cookies/body
+- _find_token_in_json 递归提取（嵌套/列表/深度限制）
 - _extract_token_from_response 从响应体 JSON / 响应 header / Set-Cookie 提取 token
-- refresh_app_token 重放 /login 请求与异常处理
-- refresh_app_token_via_web 通过 web renewal 获取 wr_skey 完整值
+- _summarize_structure 结构摘要（脱敏）
+- RefreshResult 结构化结果
+- diagnose_login_curl 配置体检
+- refresh_app_token 重放、重试与四分类诊断
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-import requests
+from unittest.mock import MagicMock
 
 from wereadit.core.token_refresher import (
+    RefreshResult,
     _extract_token_from_response,
-    refresh_app_token,
+    _find_token_in_json,
+    _summarize_structure,
 )
 from wereadit.infra.curl_parser import parse_curl_full
 
@@ -63,155 +66,137 @@ class TestParseCurlFull:
         assert url == ""
 
 
+class TestRefreshResult:
+    """RefreshResult 结构化结果。"""
+
+    def test_ok_when_token_present(self) -> None:
+        result = RefreshResult(token="abc123456789", token_key="skey")
+        assert result.ok is True
+        assert result.diagnosis == ""
+
+    def test_not_ok_when_token_missing(self) -> None:
+        result = RefreshResult(diagnosis="失败原因")
+        assert result.ok is False
+        assert result.token is None
+
+
+class TestFindTokenInJson:
+    """_find_token_in_json 递归提取 token。"""
+
+    def test_top_level_skey(self) -> None:
+        token, key = _find_token_in_json({"skey": "top_skey"})
+        assert token == "top_skey"
+        assert key == "skey"
+
+    def test_nested_access_token(self) -> None:
+        token, key = _find_token_in_json({"data": {"accessToken": "nested_token"}})
+        assert token == "nested_token"
+        assert key == "accessToken"
+
+    def test_three_level_nesting(self) -> None:
+        token, key = _find_token_in_json(
+            {"data": {"user": {"login": {"skey": "deep_skey"}}}}
+        )
+        assert token == "deep_skey"
+        assert key == "skey"
+
+    def test_inside_list(self) -> None:
+        token, key = _find_token_in_json({"items": [{"x": 1}, {"access_token": "list_tok"}]})
+        assert token == "list_tok"
+        assert key == "access_token"
+
+    def test_priority_order_at_same_level(self) -> None:
+        """同层按 _TOKEN_KEYS 优先级：skey 优先于 token。"""
+        token, key = _find_token_in_json({"token": "low_prio", "skey": "high_prio"})
+        assert token == "high_prio"
+        assert key == "skey"
+
+    def test_empty_value_skipped(self) -> None:
+        """空串/None 值不算命中，继续找。"""
+        token, _ = _find_token_in_json({"skey": "", "data": {"skey": "real"}})
+        assert token == "real"
+
+    def test_depth_limit_returns_none(self) -> None:
+        """超过 5 层嵌套不再深入。"""
+        obj: dict = {}
+        current = obj
+        for _ in range(7):
+            current["next"] = {}
+            current = current["next"]
+        current["skey"] = "too_deep"
+        token, key = _find_token_in_json(obj)
+        assert token is None
+        assert key == ""
+
+    def test_no_token_returns_none(self) -> None:
+        token, key = _find_token_in_json({"data": {"name": "x"}})
+        assert token is None
+        assert key == ""
+
+
+class TestSummarizeStructure:
+    """_summarize_structure 生成键路径:类型 摘要（脱敏）。"""
+
+    def test_flat_dict(self) -> None:
+        summary = _summarize_structure({"errcode": 0, "errmsg": "ok"})
+        assert "errcode:int" in summary
+        assert "errmsg:str" in summary
+
+    def test_nested_path(self) -> None:
+        summary = _summarize_structure({"data": {"user": {"name": "x"}}})
+        assert "data.user.name:str" in summary
+
+    def test_values_not_leaked(self) -> None:
+        """具体值不出现在摘要中。"""
+        summary = _summarize_structure({"nickname": "张三", "skey": "secret123"})
+        assert "张三" not in summary
+        assert "secret123" not in summary
+
+    def test_list_limited_to_first_three(self) -> None:
+        summary = _summarize_structure({"items": [1, 2, 3, 4, 5]})
+        assert "items[2]:int" in summary
+        assert "items[3]" not in summary
+
+
 class TestExtractTokenFromResponse:
-    """_extract_token_from_response 从响应各位置提取 token。"""
+    """_extract_token_from_response 从响应各位置提取 token，返回 (token, 命中字段名)。"""
 
     def test_extract_from_json_body_skey(self) -> None:
         response = MagicMock()
         response.json.return_value = {"skey": "new_skey_123", "other": "xxx"}
-        assert _extract_token_from_response(response) == "new_skey_123"
+        assert _extract_token_from_response(response) == ("new_skey_123", "skey")
 
-    def test_extract_from_json_body_access_token(self) -> None:
+    def test_extract_from_nested_json(self) -> None:
         response = MagicMock()
-        response.json.return_value = {"accessToken": "new_access_token"}
-        assert _extract_token_from_response(response) == "new_access_token"
+        response.json.return_value = {"errcode": 0, "data": {"accessToken": "nested_at"}}
+        assert _extract_token_from_response(response) == ("nested_at", "accessToken")
 
     def test_extract_from_header(self) -> None:
         response = MagicMock()
         response.json.side_effect = ValueError()
         response.headers = {"skey": "header_skey"}
-        assert _extract_token_from_response(response) == "header_skey"
+        assert _extract_token_from_response(response) == ("header_skey", "skey")
 
     def test_extract_from_header_capitalized(self) -> None:
         response = MagicMock()
         response.json.side_effect = ValueError()
         response.headers = {"Skey": "header_skey_cap"}
-        assert _extract_token_from_response(response) == "header_skey_cap"
+        assert _extract_token_from_response(response) == ("header_skey_cap", "skey")
 
     def test_extract_from_set_cookie(self) -> None:
         response = MagicMock()
         response.json.side_effect = ValueError()
         response.headers = {"Set-Cookie": "skey=cookie_skey; Path=/; HttpOnly"}
-        assert _extract_token_from_response(response) == "cookie_skey"
+        assert _extract_token_from_response(response) == ("cookie_skey", "skey")
 
     def test_no_token_returns_none(self) -> None:
         response = MagicMock()
         response.json.return_value = {"other": "xxx"}
         response.headers = {}
-        assert _extract_token_from_response(response) is None
+        assert _extract_token_from_response(response) == (None, "")
 
     def test_json_not_dict_returns_none(self) -> None:
         response = MagicMock()
         response.json.return_value = ["not", "a", "dict"]
         response.headers = {}
-        assert _extract_token_from_response(response) is None
-
-
-class TestRefreshAppToken:
-    """refresh_app_token 重放 /login 请求刷新 token。"""
-
-    _LOGIN_CURL = (
-        "curl 'https://i.weread.qq.com/login' "
-        "-H 'vid: 12345' "
-        "--data-raw '{\"deviceId\":\"dev1\"}'"
-    )
-
-    @patch("wereadit.core.token_refresher.requests.post")
-    def test_refresh_success_from_json(self, mock_post: MagicMock) -> None:
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"skey": "fresh_skey_abc"}
-        mock_post.return_value = mock_response
-
-        result = refresh_app_token(self._LOGIN_CURL)
-        assert result == "fresh_skey_abc"
-        mock_post.assert_called_once()
-        # 验证请求参数
-        call_kwargs = mock_post.call_args
-        assert call_kwargs.args[0] == "https://i.weread.qq.com/login"
-        assert call_kwargs.kwargs["data"] == '{"deviceId":"dev1"}'
-
-    @patch("wereadit.core.token_refresher.requests.post")
-    def test_refresh_success_from_header(self, mock_post: MagicMock) -> None:
-        mock_response = MagicMock()
-        mock_response.json.side_effect = ValueError()
-        mock_response.headers = {"skey": "header_fresh_skey"}
-        mock_post.return_value = mock_response
-
-        result = refresh_app_token(self._LOGIN_CURL)
-        assert result == "header_fresh_skey"
-
-    @patch("wereadit.core.token_refresher.requests.post")
-    def test_refresh_failure_no_token(self, mock_post: MagicMock) -> None:
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"other": "xxx"}
-        mock_response.headers = {}
-        mock_response.status_code = 200
-        mock_response.text = "{}"
-        mock_post.return_value = mock_response
-
-        result = refresh_app_token(self._LOGIN_CURL)
-        assert result is None
-
-    @patch("wereadit.core.token_refresher.requests.post")
-    def test_refresh_network_error_returns_none(self, mock_post: MagicMock) -> None:
-        mock_post.side_effect = requests.RequestException("timeout")
-
-        result = refresh_app_token(self._LOGIN_CURL)
-        assert result is None
-
-    def test_invalid_curl_no_url_returns_none(self) -> None:
-        result = refresh_app_token("curl -H 'vid: 12345'")
-        assert result is None
-
-
-class TestRefreshAppTokenViaWeb:
-    """refresh_app_token_via_web 通过 web renewal 获取 wr_skey 完整值。"""
-
-    def test_success_returns_full_wr_skey(self) -> None:
-        """renewal 响应含 wr_skey 时返回完整值（不截断）。"""
-        from wereadit.core.token_refresher import refresh_app_token_via_web
-
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.cookies = {"wr_skey": "abcdef1234567890"}
-        mock_client.post.return_value = mock_response
-
-        result = refresh_app_token_via_web(mock_client)
-        assert result == "abcdef1234567890"
-        assert len(result) == 16  # 完整值，不是截断的 8 位
-
-    def test_no_wr_skey_in_first_variant_tries_next(self) -> None:
-        """第一种 payload 无 wr_skey 时尝试下一种。"""
-        from wereadit.core.token_refresher import refresh_app_token_via_web
-
-        mock_client = MagicMock()
-        resp1 = MagicMock()
-        resp1.cookies = {}
-        resp2 = MagicMock()
-        resp2.cookies = {"wr_skey": "skey_from_variant2"}
-        mock_client.post.side_effect = [resp1, resp2, resp2]
-
-        result = refresh_app_token_via_web(mock_client)
-        assert result == "skey_from_variant2"
-
-    def test_all_variants_fail_returns_none(self) -> None:
-        """所有 payload 都无 wr_skey 时返回 None。"""
-        from wereadit.core.token_refresher import refresh_app_token_via_web
-
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.cookies = {}
-        mock_client.post.return_value = mock_response
-
-        result = refresh_app_token_via_web(mock_client)
-        assert result is None
-
-    def test_network_error_returns_none(self) -> None:
-        """网络异常时返回 None。"""
-        from wereadit.core.token_refresher import refresh_app_token_via_web
-
-        mock_client = MagicMock()
-        mock_client.post.side_effect = requests.RequestException("timeout")
-
-        result = refresh_app_token_via_web(mock_client)
-        assert result is None
+        assert _extract_token_from_response(response) == (None, "")

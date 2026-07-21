@@ -15,6 +15,9 @@ EXCHANGE_URL = "https://i.weread.qq.com/weekly/exchange"
 
 # App 端 /login 接口超时（用于刷新 skey/accessToken，实现兑换 Token 自动续期）
 LOGIN_TIMEOUT = 15
+# App 端 /login 重试参数（刷新 token，网络异常时退避重试）
+LOGIN_MAX_ATTEMPTS = 3
+LOGIN_RETRY_INTERVAL = 5
 
 # 【保活策略 - SIGN_KEY 不能改】
 # 用于 sg 字段签名: sg = sha256(ts + rn + SIGN_KEY)
