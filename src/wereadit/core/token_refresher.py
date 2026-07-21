@@ -180,6 +180,8 @@ def refresh_app_token(login_curl: str) -> RefreshResult:
     - 服务端拒绝（HTTP 4xx / errcode 非 0）：不重试，指引重新抓包
     - 结构未知（200 但提取不到 token）：不重试，诊断含响应结构摘要
 
+    注意：本函数不抛异常，所有失败均以 RefreshResult.diagnosis 返回（调用方无需 try/except）。
+
     Args:
         login_curl: /login 请求的 cURL 命令（抓包工具「复制为 Bash」）
 

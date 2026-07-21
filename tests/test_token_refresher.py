@@ -389,6 +389,7 @@ class TestRefreshAppToken:
         assert result.ok is True
         assert result.token == "after_500"
         assert mock_post.call_count == 2
+        mock_sleep.assert_called_once_with(5)
 
     def test_invalid_curl_no_url(self) -> None:
         result = refresh_app_token("curl -H 'vid: 12345'")

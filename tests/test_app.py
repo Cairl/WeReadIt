@@ -118,7 +118,7 @@ class TestMainTokenRefresh:
     )
 
     def _run_main(self, cfg: Config, call_order: list[str] | None = None):
-        """以 mock 跑 main()，返回 (exit_code, mock_push, mock_exchange)。"""
+        """以 mock 跑 main()，返回 (exit_code, mock_push, mock_exchange, mock_refresh)。"""
         from wereadit.core.token_refresher import RefreshResult
 
         def _refresh_side_effect(*args):

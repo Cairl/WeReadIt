@@ -47,7 +47,7 @@ src/wereadit/
 ├── constants.py    # URL、加密盐、默认值、平台常量（带【保活策略】注释）
 ├── core/
 │   ├── reader.py   # 阅读循环 + Cookie 刷新 + 熔断 + fix 后重试
-│   ├── exchanger.py # 奖励兑换（兑换前自动刷新 App Token）
+│   ├── exchanger.py # 奖励兑换（token 外部注入 + 年龄超 90 分钟补刷保险）
 │   └── token_refresher.py # App 端 Token 续期（/login 重放 + 配置体检 + 四分类诊断）
 ├── infra/
 │   ├── http.py     # HttpClient（Session 复用 TCP，cookies 业务层独占）

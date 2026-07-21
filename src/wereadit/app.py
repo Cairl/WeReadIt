@@ -91,7 +91,7 @@ def main() -> int:
                         "WEREAD_LOGIN_CURL 与兑换 Token 似乎抓自不同平台的设备，"
                         "请统一为同一台设备的抓包"
                     )
-                    logger.warning(refresh_diagnosis)
+                    logger.warning("%s", refresh_diagnosis)
                 else:
                     refresh_diagnosis = refresh_result.diagnosis
                     logger.warning("阅读前刷新 Token 失败: %s", refresh_diagnosis)
