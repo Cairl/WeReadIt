@@ -263,9 +263,6 @@ def refresh_app_token(login_curl: str) -> RefreshResult:
 
         token, token_key = _extract_token_from_response(response)
         if token:
-            logger.info(
-                "App Token 刷新成功, 字段=%s, 新 token=%s...", token_key, token[:8]
-            )
             return RefreshResult(token=token, token_key=token_key)
 
         structure = _summarize_structure(data)
