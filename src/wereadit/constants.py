@@ -81,6 +81,10 @@ PUSH_RETRY_MAX_WAIT = 360
 EXCHANGE_MAX_RETRY = 3
 EXCHANGE_RETRY_INTERVAL = 5
 
+# 兑换 Token 补刷阈值（秒）：阅读前刷新后，若兑换前 token 年龄超过该值则补刷一次
+# （App token 有效期约 2 小时，90 分钟留 30 分钟余量）
+TOKEN_MAX_AGE_SECONDS = 90 * 60
+
 # 平台标识
 PLATFORM_ANDROID = "android"
 PLATFORM_IOS = "ios"

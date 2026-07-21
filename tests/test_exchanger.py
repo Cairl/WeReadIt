@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from unittest.mock import MagicMock, patch
+import time
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -14,6 +15,7 @@ from wereadit.constants import (
     ERRCODE_TOKEN_EXPIRED,
 )
 from wereadit.core.exchanger import _parse_strategy, exchange_awards
+from wereadit.core.token_refresher import RefreshResult
 from wereadit.exceptions import ExchangeError
 
 
@@ -100,12 +102,6 @@ class TestParseStrategy:
 
 
 class TestExchangeAwards:
-    @pytest.fixture(autouse=True)
-    def _mock_token_refresher(self):
-        """mock token refresher 返回 None，避免续期调用消耗 mock_client.post。"""
-        with patch("wereadit.core.token_refresher.refresh_app_token", return_value=None):
-            yield
-
     def test_missing_vid_returns_error(self, mock_client: MagicMock) -> None:
         cfg = _make_cfg(cookies={})
         result = exchange_awards(mock_client, cfg)
@@ -192,6 +188,87 @@ class TestExchangeAwards:
         assert "accessToken" not in kwargs["headers"]
 
 
+class TestExchangeTokenRefresh:
+    """补刷保险：token 年龄超阈值时兑换前调 refresher 补刷。"""
+
+    def test_refresh_triggered_when_token_old(self, mock_client: MagicMock) -> None:
+        """token 年龄 > TOKEN_MAX_AGE_SECONDS：补刷并用新 token 兑换。"""
+        cfg = _make_cfg()
+        query_resp = _mock_award_data()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = query_resp
+        mock_client.post.return_value = mock_response
+
+        refresher = MagicMock(
+            return_value=RefreshResult(token="new_token_123456", token_key="accessToken")
+        )
+        exchange_awards(
+            mock_client,
+            cfg,
+            refresher=refresher,
+            token_refreshed_at=time.time() - 6000,
+        )
+        refresher.assert_called_once()
+        _, kwargs = mock_client.post.call_args
+        assert kwargs["headers"]["accessToken"] == "new_token_123456"
+
+    def test_refresh_not_triggered_when_token_fresh(self, mock_client: MagicMock) -> None:
+        """token 年龄 < 阈值：不补刷。"""
+        cfg = _make_cfg()
+        query_resp = _mock_award_data()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = query_resp
+        mock_client.post.return_value = mock_response
+
+        refresher = MagicMock()
+        exchange_awards(
+            mock_client,
+            cfg,
+            refresher=refresher,
+            token_refreshed_at=time.time() - 100,
+        )
+        refresher.assert_not_called()
+        _, kwargs = mock_client.post.call_args
+        assert kwargs["headers"]["accessToken"] == "test_token"
+
+    def test_refresh_failure_keeps_old_token(self, mock_client: MagicMock) -> None:
+        """补刷失败：沿用原 token 继续兑换。"""
+        cfg = _make_cfg()
+        query_resp = _mock_award_data()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = query_resp
+        mock_client.post.return_value = mock_response
+
+        refresher = MagicMock(return_value=RefreshResult(diagnosis="网络异常"))
+        exchange_awards(
+            mock_client,
+            cfg,
+            refresher=refresher,
+            token_refreshed_at=time.time() - 6000,
+        )
+        _, kwargs = mock_client.post.call_args
+        assert kwargs["headers"]["accessToken"] == "test_token"
+
+    def test_no_refresher_no_crash_when_token_old(self, mock_client: MagicMock) -> None:
+        """refresher 为 None 时即使 token 很旧也不补刷、不崩溃。"""
+        cfg = _make_cfg()
+        query_resp = _mock_award_data()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = query_resp
+        mock_client.post.return_value = mock_response
+
+        result = exchange_awards(
+            mock_client,
+            cfg,
+            token_refreshed_at=time.time() - 6000,
+        )
+        assert "兑换奖励失败" not in result
+
+
 class TestExchangeLogging:
     """排查 token 过快过期：验证兑换流程的关键日志输出。
 
@@ -200,12 +277,6 @@ class TestExchangeLogging:
     - Token 过期时记录 WARNING 日志，包含 token 前 8 位
     - 兑换接口失败时记录 HTTP 状态码、errcode、errmsg、响应体片段
     """
-
-    @pytest.fixture(autouse=True)
-    def _mock_token_refresher(self):
-        """mock token refresher 返回 None，避免续期调用消耗 mock_client.post。"""
-        with patch("wereadit.core.token_refresher.refresh_app_token", return_value=None):
-            yield
 
     def test_exchange_start_logs_token_preview(
         self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture

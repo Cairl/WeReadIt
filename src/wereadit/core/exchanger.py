@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from wereadit.core.token_refresher import RefreshResult
 
 from wereadit.config import Config
 from wereadit.constants import (
@@ -39,6 +43,7 @@ from wereadit.constants import (
     IOS_UA,
     IOS_V,
     PLATFORM_IOS,
+    TOKEN_MAX_AGE_SECONDS,
 )
 from wereadit.exceptions import ExchangeError
 from wereadit.infra.http import HttpClient
@@ -139,12 +144,18 @@ def _parse_strategy(strategy_str: str) -> dict[int, int]:
 def exchange_awards(
     client: HttpClient,
     cfg: Config,
+    *,
+    refresher: Callable[[], RefreshResult] | None = None,
+    token_refreshed_at: float | None = None,
 ) -> str:
     """查询并兑换阅读奖励。
 
     Args:
         client: HTTP 客户端
-        cfg: 运行时配置（包含 access_token / vid / exchange_award / platform）
+        cfg: 运行时配置（token 应由调用方在阅读前刷新并注入）
+        refresher: 可选的 token 刷新回调（补刷保险用）
+        token_refreshed_at: token 刷新时刻（time.time() 返回值），与 refresher
+            配合；兑换前 token 年龄超过 TOKEN_MAX_AGE_SECONDS 时调 refresher 补刷
 
     Returns:
         兑换结果摘要字符串（用于推送）
@@ -155,20 +166,22 @@ def exchange_awards(
         logger.warning("cookie 中未找到 wr_vid，跳过兑换")
         return "兑换奖励失败: cookie 中未找到 wr_vid"
 
+    # 补刷保险：阅读耗时过长导致 token 年龄接近 2 小时有效期时，兑换前再刷一次
+    if (
+        refresher is not None
+        and token_refreshed_at is not None
+        and time.time() - token_refreshed_at > TOKEN_MAX_AGE_SECONDS
+    ):
+        logger.info("token 年龄超过 %ds，兑换前补刷...", TOKEN_MAX_AGE_SECONDS)
+        refresh_result = refresher()
+        if refresh_result.ok:
+            auth_token = refresh_result.token
+            logger.info("补刷成功, 新 token=%s...", auth_token[:8])
+        else:
+            logger.warning("补刷失败，沿用原 token: %s", refresh_result.diagnosis)
+
     strategy = _parse_strategy(cfg.exchange_award)
     platform_name = "iOS" if cfg.weread_platform == PLATFORM_IOS else "Android"
-
-    # Token 自动续期：如果配置了 WEREAD_LOGIN_CURL，重放 /login 请求刷新 skey
-    # 注意：web wr_skey 不能用于 App 接口（2026-07-21 已证实两套独立体系，
-    # wr_skey 完整长度仅 8 位，与 App skey 不同），已移除该路径
-    from wereadit.core.token_refresher import refresh_app_token
-
-    if cfg.weread_login_curl:
-        new_token = refresh_app_token(cfg.weread_login_curl)
-        if new_token:
-            auth_token = new_token
-        else:
-            logger.warning("Token 刷新失败，降级使用原 token")
 
     # 排查 token 过快过期：记录本次使用的 token 前 8 位，便于对应 GitHub Secrets
     token_preview = auth_token[:8] if auth_token else ""
