@@ -55,14 +55,6 @@ def _check_app_curl(cfg: Config) -> tuple[bool, str]:
     )
 
 
-def _check_push(cfg: Config) -> tuple[bool, str]:
-    """检查推送渠道配置。"""
-    method = cfg.push_method
-    if not method:
-        return False, "[异常] 推送渠道：未配置，检查结果无法推送到手机（仅见日志）"
-    return True, f"[正常] 推送渠道：{method}"
-
-
 def main() -> int:
     """配置检查入口。返回 0（全部正常）或 1（任一异常）。"""
     setup_logging()
@@ -71,7 +63,6 @@ def main() -> int:
     results = [
         _check_web_curl(cfg),
         _check_app_curl(cfg),
-        _check_push(cfg),
         (
             True,
             f"[信息] READ_NUM={cfg.read_num}（约 {cfg.read_num // 2} 分钟），"

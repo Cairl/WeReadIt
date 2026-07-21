@@ -59,7 +59,6 @@ class TestConfigCheck:
         assert "[正常] WEREAD_WEB_CURL" in report
         assert "[正常] WEREAD_APP_CURL" in report
         assert "平台自识别为 iOS" in report
-        assert "[正常] 推送渠道：pushplus" in report
         assert "READ_NUM=120" in report
         assert "全部检查通过" in report
         assert mock_push.call_args.kwargs["is_success"] is True
@@ -101,7 +100,7 @@ class TestConfigCheck:
     def test_no_push_channel_skips_push(self) -> None:
         cfg = _make_cfg(pushplus_token="")
         exit_code, mock_push = _run(cfg)
-        assert exit_code == 1  # 无推送渠道计为异常项
+        assert exit_code == 0  # 推送为可选项，不配置不影响检查结果
         mock_push.assert_not_called()
 
     def test_app_curl_android_platform(self) -> None:
