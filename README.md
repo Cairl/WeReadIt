@@ -35,7 +35,7 @@ POST https://weread.qq.com/web/book/read
 | `WEREAD_CURL_BASH`     | Secret   | 必填 | -                   | 第 1 步复制的 cURL 命令                        |
 | `WEREAD_ANDROID_TOKEN` | Secret   | 选填 | -                   | Android `accessToken`，用于兑换奖励             |
 | `WEREAD_IOS_TOKEN`     | Secret   | 选填 | -                   | iOS `skey`，用于兑换奖励                        |
-| `WEREAD_LOGIN_CURL` | Secret | 选填 | -                   | App 端 `/login` 请求 cURL，用于 Token 自动续期（推荐配置） |
+| `WEREAD_LOGIN_CURL` | Secret | 选填 | - | App 端 `/login` 请求 cURL（body 须含 `deviceId`），用于 Token 自动续期（推荐配置） |
 | `READ_NUM`             | Variable | 选填 | `120`               | 阅读次数（120 次 ≈ 60 分钟）                   |
 | `EXCHANGE_AWARD`       | Variable | 选填 | `2,2,2,2,2,2,2,2`  | 兑换策略：`0`=不兑换，`1`=体验卡，`2`=书币     |
 
@@ -78,15 +78,20 @@ POST https://weread.qq.com/web/book/read
 
 ### Token 自动续期（推荐）
 
-App 端 Token 有效期极短（约 2 小时），不配置自动续期几乎必然过期。微信读书 App 在 Token 失效时会向 `i.weread.qq.com/login` 发起刷新请求，该请求**可重放**——抓包一次后脚本可在每次兑换前重放获取新 Token。
+App Token 有效期仅约 2 小时，手动抓包无法覆盖每日定时运行。配置 `/login` 重放后，脚本每次运行会在**阅读开始前**自动刷新 Token（兑换时 token 年龄保持在有效期窗口内；若阅读耗时过长，兑换前还会补刷一次）。
 
-配置步骤：
+抓包要点（决定成败）：
 
-1. 用抓包工具捕获 App 端 `i.weread.qq.com/login` 请求（在 App 中操作触发 Token 刷新，或等待 2 小时后重新打开 App）。
-2. 将该请求复制为 cURL (Bash) 格式。
-3. 配置到 Secret `WEREAD_LOGIN_CURL`。
+1. **杀掉微信读书 App 重新打开**（冷启动会触发 /login 刷新请求）。
+2. 用抓包工具捕获 `i.weread.qq.com/login` 请求，**确认请求 body 中含 `deviceId`**（长效设备凭证，是重放换新 token 的依据；缺了它重放必然失败）。
+3. 将该请求复制为 cURL (Bash) 格式。
+4. 配置到 Secret `WEREAD_LOGIN_CURL`。
 
-配置后，脚本每次兑换前会自动重放 `/login` 请求刷新 Token，无需再手动更新 `WEREAD_ANDROID_TOKEN` / `WEREAD_IOS_TOKEN`。若刷新失败，会降级使用原 Token 并记录告警日志。
+注意：`WEREAD_LOGIN_CURL` 与兑换 Token（`WEREAD_ANDROID_TOKEN` / `WEREAD_IOS_TOKEN`）必须抓自**同一平台**的设备（iOS 下发 skey，Android 下发 accessToken，交叉配置会被平台校验拦截）。
+
+配置后无需再手动更新 Token。脚本启动时会对 curl 做静态体检（是否 /login、是否含 deviceId），刷新失败时会把诊断与下一步指引**直接写进推送消息**，无需翻 Actions 日志。
+
+> 兜底思路（本项目未实现）：若 `/login` 重放被服务端彻底关闭，社区方案是手机端用 Quantumult X / 快捷指令定时拦截 App 的 skey 并调用 GitHub API 更新 Secrets。依赖手机常开与抓包 App，仅作为最后手段记录在案。
 
 ## 本地运行
 
