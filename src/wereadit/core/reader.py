@@ -179,6 +179,7 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
     fix_retry_success = 0
     cookie_refresh_count = 1  # 启动时已刷新 1 次
     circuit_breaker_triggered = False
+    last_printed_index = 0  # 进度打印去重：仅在 index 变化时打印
 
     while index <= total:
         # 【保活策略】删除上次签名,防止用旧 s 字段(服务器会拒)
@@ -196,7 +197,8 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
         # 【保活策略】sg/s 签名,服务器校验请求合法性,不能改算法
         sign_request(data, SIGN_KEY)
 
-        if refresh_print:
+        if refresh_print and index != last_printed_index:
+            last_printed_index = index
             refresh_print(
                 f"阅读进度: 第 {index}/{total} 次，已阅读 {(index - 1) * 0.5:.1f} 分钟"
             )
@@ -223,16 +225,18 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
                 no_synckey_streak += 1
                 if no_synckey_streak >= MAX_NO_SYNCKEY:
                     msg = (
-                        f"连续 {MAX_NO_SYNCKEY} 次无 synckey，熔断退出。"
-                        f"已完成 {index - 1}/{total} 次。"
+                        f"连续 {MAX_NO_SYNCKEY} 次无 synckey 修复无效，任务中止"
+                        f"（已完成 {index - 1}/{total} 次）。"
+                        "通常是 cookie 失效或触发风控，请检查 WEREAD_WEB_CURL"
                     )
                     logger.error(msg)
                     circuit_breaker_triggered = True
                     raise ReadFailedError(msg)
-                logger.warning("无 synckey，尝试修复...")
+                logger.info(
+                    "第 %d/%d 次：阅读上下文未同步，已自动修复并重试", index, total
+                )
                 fix_no_synckey(client, cfg)
                 no_synckey_fix_triggered += 1
-                logger.info("fix_no_synckey 已调用，重试 read 接口...")
                 # 修复后立即重试一次 read（重新签名，因为 ts/rn 需要更新）
                 # 这样不会丢失本次阅读进度
                 retry_time = int(time.time())
@@ -248,7 +252,7 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
                 )
                 retry_data = retry_response.json()
                 if "synckey" in retry_data:
-                    logger.info("synckey 修复成功，继续阅读")
+                    logger.info("第 %d/%d 次：修复成功，继续阅读", index, total)
                     last_time = retry_time
                     index += 1
                     no_synckey_streak = 0
@@ -257,9 +261,18 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
                     time.sleep(READ_INTERVAL_SECONDS)
                     continue
                 # 重试仍无 synckey，短暂退避后进入下一轮循环
-                logger.warning(
-                    "修复后重试仍无 synckey，退避 %ds 后进入下一轮循环",
+                backoff_log = (
+                    logger.warning
+                    if no_synckey_streak >= MAX_NO_SYNCKEY - 1
+                    else logger.info
+                )
+                backoff_log(
+                    "第 %d/%d 次：修复未生效，%ds 后重试（连续 %d/%d 次）",
+                    index,
+                    total,
                     CIRCUIT_BREAKER_BACKOFF,
+                    no_synckey_streak,
+                    MAX_NO_SYNCKEY,
                 )
                 time.sleep(CIRCUIT_BREAKER_BACKOFF)
         else:
