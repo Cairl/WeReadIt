@@ -138,6 +138,37 @@ def _summarize_structure(obj: object) -> str:
     return ", ".join(items) if items else "(空)"
 
 
+def diagnose_login_curl(login_curl: str) -> str:
+    """静态体检 login curl（不发请求），返回诊断；空串表示通过。
+
+    校验项：
+    1. 非空且能解析出 URL
+    2. URL 是 /login 请求（重放其他请求无法换新 token）
+    3. body 含 deviceId（长效设备凭证，是 /login 换新 token 的依据）
+    """
+    if not login_curl.strip():
+        return "WEREAD_LOGIN_CURL 为空，请按 README「Token 自动续期」一节配置"
+
+    url, _, _, body = parse_curl_full(login_curl)
+    if not url:
+        return (
+            "无法从 WEREAD_LOGIN_CURL 解析出 URL，"
+            "请确认 Secret 中是完整的 cURL 命令（抓包工具「复制为 cURL (Bash)」）"
+        )
+    if "/login" not in url:
+        return (
+            f"抓到的请求不是 /login 而是 {url}。"
+            "请按 README 抓包指引，在 App 触发 Token 刷新（杀掉 App 重新打开）时，"
+            "抓取 i.weread.qq.com/login 请求"
+        )
+    if "deviceId" not in body:
+        return (
+            "/login 请求 body 中缺少 deviceId（长效设备凭证），重放无法换新 Token。"
+            "请抓取 App 冷启动（杀掉 App 重新打开）时的 /login 请求，确保 body 含 deviceId"
+        )
+    return ""
+
+
 def refresh_app_token(login_curl: str) -> str | None:
     """重放 /login 请求刷新 App 端 skey/accessToken。
 

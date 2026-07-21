@@ -19,6 +19,7 @@ from wereadit.core.token_refresher import (
     _extract_token_from_response,
     _find_token_in_json,
     _summarize_structure,
+    diagnose_login_curl,
 )
 from wereadit.infra.curl_parser import parse_curl_full
 
@@ -200,3 +201,42 @@ class TestExtractTokenFromResponse:
         response.json.return_value = ["not", "a", "dict"]
         response.headers = {}
         assert _extract_token_from_response(response) == (None, "")
+
+
+class TestDiagnoseLoginCurl:
+    """diagnose_login_curl 静态体检（不发请求），空串 = 通过。"""
+
+    _GOOD_CURL = (
+        "curl 'https://i.weread.qq.com/login' "
+        "-H 'vid: 12345' "
+        "--data-raw '{\"deviceId\":\"dev1\",\"deviceName\":\"iPhone\"}'"
+    )
+
+    def test_good_curl_passes(self) -> None:
+        assert diagnose_login_curl(self._GOOD_CURL) == ""
+
+    def test_empty_curl(self) -> None:
+        diagnosis = diagnose_login_curl("   ")
+        assert "为空" in diagnosis
+
+    def test_no_url(self) -> None:
+        diagnosis = diagnose_login_curl("curl -H 'vid: 12345'")
+        assert "URL" in diagnosis
+
+    def test_not_login_url(self) -> None:
+        curl = (
+            "curl 'https://i.weread.qq.com/readdetail' "
+            "--data-raw '{\"deviceId\":\"dev1\"}'"
+        )
+        diagnosis = diagnose_login_curl(curl)
+        assert "不是 /login" in diagnosis
+        assert "readdetail" in diagnosis
+
+    def test_missing_device_id(self) -> None:
+        curl = (
+            "curl 'https://i.weread.qq.com/login' "
+            "--data-raw '{\"deviceName\":\"iPhone\"}'"
+        )
+        diagnosis = diagnose_login_curl(curl)
+        assert "deviceId" in diagnosis
+        assert "冷启动" in diagnosis
