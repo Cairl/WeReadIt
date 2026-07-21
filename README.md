@@ -14,38 +14,24 @@
 
 ## 快速开始
 
-### 1. 获取 `read` 请求
-
-1. 登录微信读书网页版。
-2. 打开任意书籍（推荐《三体》）开始阅读并翻页。
-3. 使用浏览器开发者工具抓取：
-
-```
-POST https://weread.qq.com/web/book/read
-```
-
-复制该请求为 **cURL (Bash)**。
-
-### 2. 配置 Secrets and Variables
+### 1. 配置 Secrets and Variables
 
 仓库进入 **Settings → Secrets and variables → Actions**。
 
-| 配置项                 | 类型     | 要求 | 默认值              | 说明                                           |
-| ---------------------- | -------- | ---- | ------------------- | ---------------------------------------------- |
-| `WEREAD_CURL_BASH`     | Secret   | 必填 | -                   | 第 1 步复制的 cURL 命令                        |
-| `WEREAD_ANDROID_TOKEN` | Secret   | 选填 | -                   | Android `accessToken`，用于兑换奖励             |
-| `WEREAD_IOS_TOKEN`     | Secret   | 选填 | -                   | iOS `skey`，用于兑换奖励                        |
-| `WEREAD_LOGIN_CURL` | Secret | 选填 | - | App 端 `/login` 请求 cURL（body 须含 `deviceId`），用于 Token 自动续期（推荐配置） |
-| `READ_NUM`             | Variable | 选填 | `120`               | 阅读次数（120 次 ≈ 60 分钟）                   |
-| `EXCHANGE_AWARD`       | Variable | 选填 | `2,2,2,2,2,2,2,2`  | 兑换策略：`0`=不兑换，`1`=体验卡，`2`=书币     |
+| 配置项             | 类型     | 要求 | 默认值             | 说明                                                     |
+| ------------------ | -------- | ---- | ------------------ | -------------------------------------------------------- |
+| `WEREAD_WEB_CURL`  | Secret   | 必填 | -                  | 网页端 read 请求 cURL（第 1 步复制），阅读与 `wr_vid` 来源 |
+| `WEREAD_APP_CURL`  | Secret   | 推荐 | -                  | App 端 `/login` 请求 cURL（body 须含 `deviceId`），兑换 Token 全自动续期与平台自识别 |
+| `READ_NUM`         | Variable | 选填 | `120`              | 阅读次数（120 次 ≈ 60 分钟）                              |
+| `EXCHANGE_AWARD`   | Variable | 选填 | `2,2,2,2,2,2,2,2` | 兑换策略：`0`=不兑换，`1`=体验卡，`2`=书币                 |
 
-### 3. 运行
+### 2. 运行
 
 推送到 GitHub 后即可运行。
 
 默认每天 **北京时间 00:00** 自动执行，支持在 GitHub Actions 页面手动触发。
 
-### 4. 配置推送
+### 3. 配置推送
 
 | 配置项               | 类型   | 要求 | 默认值 | 说明                                    |
 | -------------------- | ------ | ---- | ------ | --------------------------------------- |
@@ -55,41 +41,39 @@ POST https://weread.qq.com/web/book/read
 | `TELEGRAM_CHAT_ID`   | Secret | 选填 | -      | Telegram 会话 ID（需同时配置 BOT_TOKEN） |
 | `SERVERCHAN`         | Secret | 选填 | -      | ServerChan 推送 token                   |
 
-## 奖励兑换
+## 配置（三步走）
 
-网页 Cookie 无法调用奖励兑换接口，需要使用微信读书 App 的认证 Token。
+### 第 1 步：配置 WEREAD_WEB_CURL（阅读必需）
 
-### 抓取 Token
+1. 浏览器登录 [微信读书网页版](https://weread.qq.com/)。
+2. F12 打开开发者工具，进入 Network，随便翻开一本书。
+3. 找到 `https://weread.qq.com/web/book/read` 请求，右键 → Copy → Copy as cURL (Bash)。
+4. 配置到 Secret `WEREAD_WEB_CURL`。
 
-抓包步骤：
+> 网页 cookie 会自动续期，配一次长期有效。
 
-1. Android 推荐使用 Reqable，iOS 推荐使用 ProxyPin。
-2. 安装并信任抓包证书。
-3. 打开微信读书 App。
-4. 抓取 `i.weread.qq.com` 任意请求。
-5. 获取：
-   - Android：请求头 `accessToken`
-   - iOS：请求头 `skey`
-6. 按需配置到：
-   - `WEREAD_ANDROID_TOKEN`
-   - `WEREAD_IOS_TOKEN`
+### 第 2 步：配置 WEREAD_APP_CURL（兑换必需）
 
-> App Token 有效期仅约 2 小时，强烈建议配置下方的 Token 自动续期。`wr_vid` 会自动从网页 Cookie 获取，无需额外配置。
-
-### Token 自动续期（推荐）
-
-App Token 有效期仅约 2 小时，手动抓包无法覆盖每日定时运行。配置 `/login` 重放后，脚本每次运行会在**阅读开始前**自动刷新 Token（兑换时 token 年龄保持在有效期窗口内；若阅读耗时过长，兑换前还会补刷一次）。
-
-抓包要点（决定成败）：
-
-1. **杀掉微信读书 App 重新打开**（冷启动会触发 /login 刷新请求）。
-2. 用抓包工具捕获 `i.weread.qq.com/login` 请求，**确认请求 body 中含 `deviceId`**（长效设备凭证，是重放换新 token 的依据；缺了它重放必然失败）。
+1. 杀掉微信读书 App 重新打开（冷启动会触发 /login 刷新请求）。
+2. 用抓包工具捕获 `i.weread.qq.com/login` 请求，确认请求 body 中含 `deviceId`（长效设备凭证，缺了它重放必然失败）。
 3. 将该请求复制为 cURL (Bash) 格式。
-4. 配置到 Secret `WEREAD_LOGIN_CURL`。
+4. 配置到 Secret `WEREAD_APP_CURL`。
 
-注意：`WEREAD_LOGIN_CURL` 与兑换 Token（`WEREAD_ANDROID_TOKEN` / `WEREAD_IOS_TOKEN`）必须抓自**同一平台**的设备（iOS 下发 skey，Android 下发 accessToken，交叉配置会被平台校验拦截）。
+> 脚本每次运行会在阅读开始前自动重放 `/login` 刷新兑换 Token，平台（iOS/Android）从响应字段自动识别，无需任何其他配置。抓一次长期有效（不换设备、不重新登录即可）。
 
-配置后无需再手动更新 Token。脚本启动时会对 curl 做静态体检（是否 /login、是否含 deviceId），刷新失败时会把诊断与下一步指引**直接写进推送消息**，无需翻 Actions 日志。
+### 第 3 步：验证配置（配置检查按钮）
+
+GitHub 仓库页 → 顶栏 `Actions` → 左侧选 **WeReadIt 配置检查** → 右侧 **Run workflow** → 几秒后推送收到检查报告。全部 `[正常]` 即托管就绪；有 `[异常]` 则按报告内指引修正后重新检查。
+
+### 迁移说明（2026-07-22 之前的老用户）
+
+Secret 已改名并精简：
+
+1. `WEREAD_CURL_BASH` → 改名 `WEREAD_WEB_CURL`（值不变，删旧建新）。
+2. `WEREAD_LOGIN_CURL` → 改名 `WEREAD_APP_CURL`（值不变，删旧建新）。
+3. `WEREAD_ANDROID_TOKEN` / `WEREAD_IOS_TOKEN` → 直接删除（兑换 Token 现已完全由 `WEREAD_APP_CURL` 自动生成）。
+
+改完后点一次「配置检查」验证（见第 3 步）。
 
 > 兜底思路（本项目未实现）：若 `/login` 重放被服务端彻底关闭，社区方案是手机端用 Quantumult X / 快捷指令定时拦截 App 的 skey 并调用 GitHub API 更新 Secrets。依赖手机常开与抓包 App，仅作为最后手段记录在案。
 
@@ -101,7 +85,7 @@ cd WeReadIt
 
 pip install -r requirements.txt
 
-export WEREAD_CURL_BASH='curl ...'
+export WEREAD_WEB_CURL='curl ...'
 
 # 可选
 export PUSHPLUS=xxxx

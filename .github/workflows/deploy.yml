@@ -43,15 +43,13 @@ jobs:
 
     - name: Run deployment script
       env:
-        WEREAD_CURL_BASH: ${{ secrets.WEREAD_CURL_BASH }}
+        WEREAD_WEB_CURL: ${{ secrets.WEREAD_WEB_CURL }}
+        WEREAD_APP_CURL: ${{ secrets.WEREAD_APP_CURL }}
         PUSHPLUS: ${{ secrets.PUSHPLUS }}
         WXPUSHER: ${{ secrets.WXPUSHER }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         SERVERCHAN: ${{ secrets.SERVERCHAN }}
-        WEREAD_ANDROID_TOKEN: ${{ secrets.WEREAD_ANDROID_TOKEN }}
-        WEREAD_IOS_TOKEN: ${{ secrets.WEREAD_IOS_TOKEN }}
-        WEREAD_LOGIN_CURL: ${{ secrets.WEREAD_LOGIN_CURL }}
         READ_NUM: ${{ vars.READ_NUM }}
         EXCHANGE_AWARD: ${{ vars.EXCHANGE_AWARD }}
 
