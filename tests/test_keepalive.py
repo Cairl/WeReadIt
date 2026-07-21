@@ -49,12 +49,13 @@ def _make_cfg(**overrides) -> Config:
         telegram_bot_token="",
         telegram_chat_id="",
         serverchan_spt="",
-        weread_android_token="",
-        weread_ios_token="",
+        weread_app_curl="",
+        app_token="",
+        app_token_key="",
         exchange_award="2,2,2,2,2,2,2,2",
         headers={"accept": "application/json"},
         cookies={"wr_skey": "initial", "wr_vid": "12345"},
-        curl_bash="",
+        web_curl="",
     )
     defaults.update(overrides)
     return Config(**defaults)

@@ -34,12 +34,13 @@ def _make_cfg(**overrides) -> Config:
         telegram_bot_token="",
         telegram_chat_id="",
         serverchan_spt="",
-        weread_android_token="test_token",
-        weread_ios_token="",
+        app_token="test_token",
+        app_token_key="accessToken",
+        weread_app_curl="",
         exchange_award="2,2,2,2,2,2,2,2",
         headers={},
         cookies={"wr_vid": "12345"},
-        curl_bash="",
+        web_curl="",
     )
     defaults.update(overrides)
     return Config(**defaults)
@@ -172,8 +173,8 @@ class TestExchangeAwards:
 
     def test_ios_platform(self, mock_client: MagicMock) -> None:
         """iOS 平台应使用 skey header。"""
-        # 通过 weread_ios_token 触发 weread_platform=PLATFORM_IOS
-        cfg = _make_cfg(weread_android_token="", weread_ios_token="ios_token")
+        # 通过 app_token_key="skey" 触发 weread_platform=PLATFORM_IOS
+        cfg = _make_cfg(app_token="ios_token", app_token_key="skey")
         query_resp = _mock_award_data()
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -282,7 +283,7 @@ class TestExchangeLogging:
         self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
     ) -> None:
         """兑换开始时应记录 token 前 8 位、平台、vid。"""
-        cfg = _make_cfg(weread_android_token="abcdefgh1234567890")
+        cfg = _make_cfg(app_token="abcdefgh1234567890")
         query_resp = _mock_award_data()
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -303,7 +304,7 @@ class TestExchangeLogging:
         self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Token 过期时应记录 WARNING 级别日志，包含 token 前 8 位。"""
-        cfg = _make_cfg(weread_android_token="abcdefgh1234567890")
+        cfg = _make_cfg(app_token="abcdefgh1234567890")
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {

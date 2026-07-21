@@ -146,12 +146,12 @@ def diagnose_login_curl(login_curl: str) -> str:
     3. body 含 deviceId（长效设备凭证，是 /login 换新 token 的依据）
     """
     if not login_curl.strip():
-        return "WEREAD_LOGIN_CURL 为空，请按 README「Token 自动续期」一节配置"
+        return "WEREAD_APP_CURL 为空，请按 README「Token 自动续期」一节配置"
 
     url, _, _, body = parse_curl_full(login_curl)
     if not url:
         return (
-            "无法从 WEREAD_LOGIN_CURL 解析出 URL，"
+            "无法从 WEREAD_APP_CURL 解析出 URL，"
             "请确认 Secret 中是完整的 cURL 命令（抓包工具「复制为 cURL (Bash)」）"
         )
     if "/login" not in url:
@@ -191,7 +191,7 @@ def refresh_app_token(login_curl: str) -> RefreshResult:
     url, headers, cookies, body = parse_curl_full(login_curl)
     if not url:
         return RefreshResult(
-            diagnosis="login curl 解析失败：未找到 URL，请检查 WEREAD_LOGIN_CURL 是否为完整 cURL 命令"
+            diagnosis="login curl 解析失败：未找到 URL，请检查 WEREAD_APP_CURL 是否为完整 cURL 命令"
         )
 
     logger.info("刷新 App Token: POST %s", url)
@@ -238,7 +238,7 @@ def refresh_app_token(login_curl: str) -> RefreshResult:
             return RefreshResult(
                 diagnosis=(
                     f"login 凭证已被服务端拒绝 (HTTP {response.status_code})，"
-                    "请重新抓包更新 WEREAD_LOGIN_CURL"
+                    "请重新抓包更新 WEREAD_APP_CURL"
                 )
             )
 
@@ -257,7 +257,7 @@ def refresh_app_token(login_curl: str) -> RefreshResult:
                 return RefreshResult(
                     diagnosis=(
                         f"login 凭证已失效 (errcode={errcode}, {errmsg})，"
-                        "请重新抓包更新 WEREAD_LOGIN_CURL"
+                        "请重新抓包更新 WEREAD_APP_CURL"
                     )
                 )
 

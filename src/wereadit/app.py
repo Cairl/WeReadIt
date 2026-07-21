@@ -13,6 +13,7 @@ import logging
 import time
 import traceback
 from functools import partial
+from typing import TYPE_CHECKING
 
 from wereadit.config import Config, load_config
 from wereadit.constants import ERRCODE_TOKEN_EXPIRED, PLATFORM_IOS
@@ -20,25 +21,17 @@ from wereadit.exceptions import CookieExpiredError, ExchangeError, ReadFailedErr
 from wereadit.infra.http import HttpClient
 from wereadit.push import push
 
+if TYPE_CHECKING:
+    from wereadit.core.token_refresher import RefreshResult
+
 logger = logging.getLogger(__name__)
 
 
-def _replace_token(cfg: Config, new_token: str) -> Config:
-    """按平台替换 Config 中对应的 token 字段（frozen dataclass 用 replace 派生新实例）。"""
-    if cfg.weread_platform == PLATFORM_IOS:
-        return dataclasses.replace(cfg, weread_ios_token=new_token)
-    return dataclasses.replace(cfg, weread_android_token=new_token)
-
-
-def _token_key_matches_platform(token_key: str, platform: str) -> bool:
-    """校验刷新得到的 token 字段名与兑换平台是否匹配。
-
-    iOS 登录响应下发 skey，Android 下发 accessToken；
-    错位说明 login curl 与兑换 Token 抓自不同平台的设备。
-    """
-    if platform == PLATFORM_IOS:
-        return token_key == "skey"
-    return token_key != "skey"
+def _inject_app_token(cfg: Config, refresh_result: RefreshResult) -> Config:
+    """把刷新得到的 token 注入 Config（平台由 token_key 自动派生）。"""
+    return dataclasses.replace(
+        cfg, app_token=refresh_result.token, app_token_key=refresh_result.token_key
+    )
 
 
 def main() -> int:
@@ -59,39 +52,36 @@ def main() -> int:
     has_failure = False  # 推送状态标志：兑换失败但阅读成功时为 False；Token 过期等致命错误为 True
 
     try:
-        # 兑换 Token 自动续期：阅读前刷新，保证兑换时 token 年龄在 2 小时窗口内
-        # （旧设计在兑换前刷新，阅读 60+ 分钟后 token 年龄贴近有效期边缘）
+        # 兑换 Token：阅读前由 /login 重放刷新生成，平台从命中字段名自识别
         refresh_diagnosis = ""
+        platform_note = ""
         refresher = None
         token_refreshed_at = None
-        if cfg.weread_access_token and cfg.weread_login_curl:
+        if cfg.weread_app_curl:
             from wereadit.core.token_refresher import (
                 diagnose_login_curl,
                 refresh_app_token,
             )
 
-            curl_diagnosis = diagnose_login_curl(cfg.weread_login_curl)
+            curl_diagnosis = diagnose_login_curl(cfg.weread_app_curl)
             if curl_diagnosis:
-                logger.warning("WEREAD_LOGIN_CURL 体检不过: %s", curl_diagnosis)
+                logger.warning("WEREAD_APP_CURL 体检不过: %s", curl_diagnosis)
                 refresh_diagnosis = f"Token 自动刷新已跳过：{curl_diagnosis}"
             else:
-                refresher = partial(refresh_app_token, cfg.weread_login_curl)
+                refresher = partial(refresh_app_token, cfg.weread_app_curl)
                 refresh_result = refresher()
-                if refresh_result.ok and _token_key_matches_platform(
-                    refresh_result.token_key, cfg.weread_platform
-                ):
-                    cfg = _replace_token(cfg, refresh_result.token)
+                if refresh_result.ok:
+                    cfg = _inject_app_token(cfg, refresh_result)
                     token_refreshed_at = time.time()
+                    platform_note = (
+                        f"平台自识别：{'iOS' if cfg.weread_platform == PLATFORM_IOS else 'Android'}"
+                        f"（依据响应字段 {refresh_result.token_key}）"
+                    )
                     logger.info(
-                        "兑换 Token 已在阅读前刷新: %s...", refresh_result.token[:8]
+                        "兑换 Token 已在阅读前刷新: %s...（%s）",
+                        refresh_result.token[:8],
+                        platform_note,
                     )
-                elif refresh_result.ok:
-                    refresh_diagnosis = (
-                        f"刷新得到的凭证类型 ({refresh_result.token_key}) 与兑换平台不匹配，"
-                        "WEREAD_LOGIN_CURL 与兑换 Token 似乎抓自不同平台的设备，"
-                        "请统一为同一台设备的抓包"
-                    )
-                    logger.warning("%s", refresh_diagnosis)
                 else:
                     refresh_diagnosis = refresh_result.diagnosis
                     logger.warning("阅读前刷新 Token 失败: %s", refresh_diagnosis)
@@ -124,22 +114,17 @@ def main() -> int:
                     # 便于用户对应 GitHub Secrets 并追踪是否为同一 token 反复过期
                     token_preview = cfg.weread_access_token[:8] if cfg.weread_access_token else ""
                     platform_label = (
-                        "iOS (WEREAD_IOS_TOKEN)"
-                        if cfg.weread_platform == PLATFORM_IOS
-                        else "Android (WEREAD_ANDROID_TOKEN)"
+                        "iOS" if cfg.weread_platform == PLATFORM_IOS else "Android"
                     )
                     logger.error("兑换 Token 已过期: %s", exc)
                     if refresh_diagnosis:
                         guidance = "根因见下方 Token 自动续期诊断。"
-                    elif cfg.weread_login_curl:
-                        guidance = "请重新抓包更新 Secret 中的 Token。"
+                    elif cfg.weread_app_curl:
+                        guidance = "请重新抓包更新 WEREAD_APP_CURL（杀 App 冷启动抓 /login，body 须含 deviceId）。"
                     else:
-                        guidance = (
-                            "未配置自动续期，请重新抓包更新 Secret 中的 Token，"
-                            "或按 README 配置 WEREAD_LOGIN_CURL 实现自动续期。"
-                        )
+                        guidance = "未配置 WEREAD_APP_CURL 自动续期，请按 README 配置。"
                     exchange_summary = (
-                        f"兑换奖励失败: {platform_label} 已过期。{guidance}\n"
+                        f"兑换奖励失败: {platform_label} Token 已过期。{guidance}\n"
                         f"过期 Token 前 8 位: {token_preview}..."
                     )
                     exit_code = 1
@@ -151,12 +136,18 @@ def main() -> int:
                 logger.error("兑换奖励异常: %s", exc)
                 exchange_summary = f"兑换奖励失败: {exc}"
         else:
-            logger.info("未配置 WEREAD_ACCESS_TOKEN，跳过兑换。")
+            logger.info("无可用兑换 Token（WEREAD_APP_CURL 未配置或刷新失败），跳过兑换。")
+            if refresh_diagnosis:
+                # 配了 APP_CURL 但刷新失败：兑换目标未达成，标记为可见失败
+                exit_code = 1
+                has_failure = True
 
         if exchange_summary:
             push_content += f"\n\n{exchange_summary}"
         if refresh_diagnosis:
             push_content += f"\n\nToken 自动续期诊断：{refresh_diagnosis}"
+        if platform_note:
+            push_content += f"\n\n{platform_note}"
 
         # 推送成功通知
         if push_method:

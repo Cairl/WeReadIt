@@ -88,14 +88,16 @@ class Config:
 
     # 兑换参数
     exchange_award: str = DEFAULT_EXCHANGE_AWARD
-    weread_android_token: str = ""
-    weread_ios_token: str = ""
-    weread_login_curl: str = ""
+    weread_app_curl: str = ""
+
+    # 运行时注入（非环境变量）：/login 重放刷新得到的 App token 与命中字段名
+    app_token: str = ""
+    app_token_key: str = ""
 
     # HTTP 请求参数
     headers: dict[str, str] = field(default_factory=dict)
     cookies: dict[str, str] = field(default_factory=dict)
-    curl_bash: str = ""
+    web_curl: str = ""
 
     def token_for(self, method: str) -> str:
         """根据推送方式返回对应的 token。"""
@@ -127,15 +129,13 @@ class Config:
 
     @property
     def weread_access_token(self) -> str:
-        if self.weread_android_token:
-            return self.weread_android_token
-        return self.weread_ios_token
+        """兑换用 App token（运行时由 /login 重放注入，见 app.py）。"""
+        return self.app_token
 
     @property
     def weread_platform(self) -> str:
-        if self.weread_android_token:
-            return PLATFORM_ANDROID
-        if self.weread_ios_token:
+        """平台由刷新命中字段名派生：skey → iOS，accessToken → Android。"""
+        if self.app_token_key == "skey":
             return PLATFORM_IOS
         return PLATFORM_ANDROID
 
@@ -144,16 +144,16 @@ def load_config() -> Config:
     """从环境变量加载配置。
 
     优先级：环境变量 > 默认值。
-    若提供 WEREAD_CURL_BASH，则从中解析 headers/cookies；否则使用默认模板。
+    若提供 WEREAD_WEB_CURL，则从中解析 headers/cookies；否则使用默认模板。
     """
     books, chapters = _load_books()
 
-    curl_bash = _env("WEREAD_CURL_BASH")
-    if curl_bash:
-        headers, cookies = parse_curl(curl_bash)
+    web_curl = _env("WEREAD_WEB_CURL")
+    if web_curl:
+        headers, cookies = parse_curl(web_curl)
     else:
         logger.warning(
-            "未配置 WEREAD_CURL_BASH，使用默认 cookies 模板。"
+            "未配置 WEREAD_WEB_CURL，使用默认 cookies 模板。"
             "生产环境必须配置自己的 curl_bash，否则请求会被服务器拒绝。"
             "本地调试可参考 README.md 抓包步骤。"
         )
@@ -174,11 +174,9 @@ def load_config() -> Config:
         telegram_bot_token=_env("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=_env("TELEGRAM_CHAT_ID"),
         serverchan_spt=_env_renamed("SERVERCHAN", "SERVERCHAN_SPT"),
-        weread_android_token=_env("WEREAD_ANDROID_TOKEN"),
-        weread_ios_token=_env("WEREAD_IOS_TOKEN"),
-        weread_login_curl=_env("WEREAD_LOGIN_CURL"),
+        weread_app_curl=_env("WEREAD_APP_CURL"),
         exchange_award=_env("EXCHANGE_AWARD", DEFAULT_EXCHANGE_AWARD),
         headers=headers,
         cookies=cookies,
-        curl_bash=curl_bash,
+        web_curl=web_curl,
     )
