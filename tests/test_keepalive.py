@@ -132,8 +132,9 @@ class TestHeadersSingleSource:
         # 让所有响应都返回 succ+synckey
         mock_post.side_effect = [
             _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"}),  # renewal
-            _mock_response({"succ": 1, "synckey": 123}),  # read #1
-            _mock_response({"succ": 1, "synckey": 124}),  # read #2
+            _mock_response({"succ": 1, "synckey": 123}),  # 预热 read
+            _mock_response({"succ": 1, "synckey": 124}),  # read #1
+            _mock_response({"succ": 1, "synckey": 125}),  # read #2
         ]
         cfg = _make_cfg(read_num=2)
         client = HttpClient(headers={"accept": "application/json"}, cookies={"wr_skey": "old"})
@@ -165,11 +166,13 @@ class TestCircuitBreaker:
         renewal_resp = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
         no_synckey_resp = _mock_response({"succ": 1})  # 无 synckey
         fix_resp = _mock_response({})
-        # 2 轮完整失败(read + fix + retry) + 第 3 轮 read 触发熔断
+        # 3 轮完整失败(read + fix + retry)；第 3 轮 retry 仍无 synckey → 预热熔断
+        # 注意：预热阶段 _read_once 在每次无 synckey 时都会触发 fix+retry，
+        # 故第 3 轮需完整的 read+fix+retry 三元组，而非单 read。
         mock_post.side_effect = [renewal_resp] + [
             no_synckey_resp, fix_resp, no_synckey_resp,  # 轮1
             no_synckey_resp, fix_resp, no_synckey_resp,  # 轮2
-            no_synckey_resp,  # 轮3 read 触发熔断
+            no_synckey_resp, fix_resp, no_synckey_resp,  # 轮3 retry 无 synckey → 熔断
         ]
 
     @patch("wereadit.infra.http.requests.Session.post")
@@ -217,8 +220,9 @@ class TestCircuitBreaker:
         fix_resp = _mock_response({})
         mock_post.side_effect = [
             renewal_resp,                        # 启动刷新
-            no_synckey_resp, fix_resp, ok_resp,  # 轮1: read → fix → retry ok
-            ok_resp,                             # 轮2: read ok, 退出
+            no_synckey_resp, fix_resp, ok_resp,  # 预热：read → fix → retry ok
+            ok_resp,                             # 主循环 read#1
+            ok_resp,                             # 主循环 read#2
         ]
         cfg = _make_cfg(read_num=2)
         client = HttpClient(cookies={"wr_skey": "old"})
@@ -226,7 +230,7 @@ class TestCircuitBreaker:
         with patch("wereadit.core.reader.time.sleep"):
             result = read_books(client, cfg)
         assert result.completed_count == 2
-        assert result.fix_retry_success == 1, "fix 后重试成功应记 1 次"
+        assert result.fix_retry_success == 0, "预热阶段的 fix 重试不计入主循环 metrics"
 
 
 # =========================================================================
@@ -242,7 +246,8 @@ class TestKeepaliveStrategies:
         """策略 #1: 启动时强制 refresh_cookie（即使 cookie 看似有效）。"""
         mock_post.side_effect = [
             _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"}),  # renewal
-            _mock_response({"succ": 1, "synckey": 1}),
+            _mock_response({"succ": 1, "synckey": 1}),  # 预热 read
+            _mock_response({"succ": 1, "synckey": 1}),  # 主循环 read#1
         ]
         cfg = _make_cfg(read_num=1)
         client = HttpClient(cookies={"wr_skey": "still_valid"})
@@ -295,12 +300,14 @@ class TestKeepaliveStrategies:
         renewal_resp = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
         no_synckey_resp = _mock_response({"succ": 1})
         fix_resp = _mock_response({})
-        # 2 轮(read + fix + retry) + 第 3 轮 read 触发熔断
+        # 3 轮完整失败(read + fix + retry)；第 3 轮 retry 仍无 synckey → 预热熔断
+        # 预热阶段 _read_once 在每次无 synckey 时都会触发 fix+retry，
+        # 故第 3 轮需完整的 read+fix+retry 三元组，而非单 read。
         mock_post.side_effect = [
             renewal_resp,
             no_synckey_resp, fix_resp, no_synckey_resp,  # 轮1
             no_synckey_resp, fix_resp, no_synckey_resp,  # 轮2
-            no_synckey_resp,  # 轮3 read 触发熔断
+            no_synckey_resp, fix_resp, no_synckey_resp,  # 轮3 retry 无 synckey → 熔断
         ]
         cfg = _make_cfg(read_num=2)
         client = HttpClient(cookies={"wr_skey": "old"})
@@ -336,28 +343,24 @@ class TestKeepaliveStrategies:
         """策略: lastTime 只在 synckey 成功时更新（rt 字段依赖）。"""
         renewal_resp = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
         ok_resp = _mock_response({"succ": 1, "synckey": 1})
-        mock_post.side_effect = [renewal_resp, ok_resp]
+        mock_post.side_effect = [renewal_resp, ok_resp, ok_resp]  # renewal + 预热 + 主循环
         cfg = _make_cfg(read_num=1)
         client = HttpClient(cookies={"wr_skey": "old"})
 
         with patch("wereadit.core.reader.time.sleep"):
             with patch("wereadit.core.reader.time.time") as mock_time:
-                # now=1000, then now=1030（rt=30 = SECONDS_PER_READ）
-                mock_time.side_effect = [1000, 1030]
-                read_books(client, cfg)
+                mock_time.side_effect = [1000, 1030, 1060]
+                result = read_books(client, cfg)
 
-        # 第二次 time() 调用（this_time=1030）- last_time(1000-30=970) = 60?
-        # 不对，让我重新看 read_books 逻辑
-        # last_time 初始化为 now() - SECONDS_PER_READ
-        # 第一次循环 this_time = now()
-        # rt = this_time - last_time = now() - (now() - 30) = 30
+        assert result.completed_count == 1
+        assert result.warmup_done is True
 
     @patch("wereadit.infra.http.requests.Session.post")
     def test_data_pop_s_each_iteration(self, mock_post) -> None:
         """策略: 每次循环开头 data.pop('s')，防止用旧签名。"""
         renewal_resp = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
         ok_resp = _mock_response({"succ": 1, "synckey": 1})
-        mock_post.side_effect = [renewal_resp, ok_resp, ok_resp]
+        mock_post.side_effect = [renewal_resp, ok_resp, ok_resp, ok_resp]  # renewal + 预热 + 2 主循环
         cfg = _make_cfg(read_num=2)
         client = HttpClient(cookies={"wr_skey": "old"})
 
@@ -369,24 +372,25 @@ class TestKeepaliveStrategies:
             c for c in mock_post.call_args_list
             if c[0][0] == READ_URL
         ]
-        assert len(read_calls) == 2
+        assert len(read_calls) == 3, "预热 + 2 次主循环共 3 次 read"
         bodies = [json.loads(c.kwargs["data"]) for c in read_calls]
-        # 两次的 s 字段应该不同（ts/rn 不同导致签名不同）
+        # 三组的 s 字段应该两两不同（ts/rn 不同导致签名不同）
         assert bodies[0]["s"] != bodies[1]["s"], "每次循环必须重新签名"
+        assert bodies[1]["s"] != bodies[2]["s"], "每次循环必须重新签名"
 
     @patch("wereadit.infra.http.requests.Session.post")
     def test_sleep_30s_after_synckey_success(self, mock_post) -> None:
         """策略 #13: synckey 成功后必须 sleep(30)。"""
         renewal_resp = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
         ok_resp = _mock_response({"succ": 1, "synckey": 1})
-        mock_post.side_effect = [renewal_resp, ok_resp, ok_resp]
+        mock_post.side_effect = [renewal_resp, ok_resp, ok_resp, ok_resp]  # renewal + 预热 + 2 主循环
         cfg = _make_cfg(read_num=2)
         client = HttpClient(cookies={"wr_skey": "old"})
 
         with patch("wereadit.core.reader.time.sleep") as mock_sleep:
             read_books(client, cfg)
 
-        # 应该有 2 次 sleep(30)（每次 synckey 成功后）
+        # 应该有 2 次 sleep(30)（每次 synckey 成功后；预热成功不 sleep）
         sleep_30_calls = [
             c for c in mock_sleep.call_args_list
             if c.args == (READ_INTERVAL_SECONDS,)
@@ -399,12 +403,13 @@ class TestKeepaliveStrategies:
         renewal_resp = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
         no_succ_resp = _mock_response({})  # 无 succ
         ok_resp = _mock_response({"succ": 1, "synckey": 1})
-        # renewal → no succ → refresh → ok
+        # renewal → no succ → refresh → ok (预热阶段吃掉上述序列)
         mock_post.side_effect = [
             renewal_resp,    # 启动刷新
-            no_succ_resp,    # read #1 失败
+            no_succ_resp,    # 预热 read #1 失败
             renewal_resp,    # refresh_cookie
-            ok_resp,         # read #1 重试（index 仍为 1）
+            ok_resp,         # 预热 read #2 成功
+            ok_resp,         # 主循环 read#1
         ]
         cfg = _make_cfg(read_num=1)
         client = HttpClient(cookies={"wr_skey": "old"})
