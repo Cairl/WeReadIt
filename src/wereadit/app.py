@@ -40,9 +40,9 @@ def main() -> int:
     Returns:
         进程退出码：0=成功，1=失败
     """
-    from wereadit.utils.logging import make_refresh_print
+    from wereadit.utils.logging import setup_logging
 
-    refresh_print = make_refresh_print()
+    setup_logging()
     cfg = load_config()
     client = HttpClient(headers=cfg.headers, cookies=cfg.cookies)
 
@@ -88,7 +88,7 @@ def main() -> int:
         # 阅读循环
         from wereadit.core.reader import read_books
 
-        result = read_books(client, cfg, refresh_print=refresh_print)
+        result = read_books(client, cfg)
         push_content = (
             f"WeReadIt 自动阅读完成。\n"
             f"阅读时长：{result.total_minutes} 分钟。\n"

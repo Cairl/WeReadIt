@@ -59,7 +59,6 @@ class TestMainExchangeErrorHandling:
         with (
             patch("wereadit.app.load_config", return_value=cfg),
             patch("wereadit.app.HttpClient"),
-            patch("wereadit.utils.logging.make_refresh_print"),
             patch("wereadit.core.reader.read_books", return_value=_mock_read_result()),
             patch(
                 "wereadit.core.exchanger.exchange_awards",
@@ -79,7 +78,6 @@ class TestMainExchangeErrorHandling:
         with (
             patch("wereadit.app.load_config", return_value=cfg),
             patch("wereadit.app.HttpClient"),
-            patch("wereadit.utils.logging.make_refresh_print"),
             patch("wereadit.core.reader.read_books", return_value=_mock_read_result()),
             patch(
                 "wereadit.core.exchanger.exchange_awards",
@@ -99,7 +97,6 @@ class TestMainExchangeErrorHandling:
         with (
             patch("wereadit.app.load_config", return_value=cfg),
             patch("wereadit.app.HttpClient"),
-            patch("wereadit.utils.logging.make_refresh_print"),
             patch("wereadit.core.reader.read_books", return_value=_mock_read_result()),
             patch("wereadit.app.push") as mock_push,
         ):
@@ -135,7 +132,6 @@ class TestMainTokenRefresh:
         with (
             patch("wereadit.app.load_config", return_value=cfg),
             patch("wereadit.app.HttpClient"),
-            patch("wereadit.utils.logging.make_refresh_print"),
             patch(
                 "wereadit.core.reader.read_books",
                 side_effect=_read_side_effect,
@@ -173,7 +169,6 @@ class TestMainTokenRefresh:
         with (
             patch("wereadit.app.load_config", return_value=cfg),
             patch("wereadit.app.HttpClient"),
-            patch("wereadit.utils.logging.make_refresh_print"),
             patch("wereadit.core.reader.read_books", return_value=_mock_read_result()),
             patch(
                 "wereadit.core.exchanger.exchange_awards",
@@ -225,7 +220,6 @@ class TestMainTokenRefresh:
         with (
             patch("wereadit.app.load_config", return_value=cfg),
             patch("wereadit.app.HttpClient"),
-            patch("wereadit.utils.logging.make_refresh_print"),
             patch("wereadit.core.reader.read_books", return_value=_mock_read_result()),
             patch("wereadit.core.exchanger.exchange_awards") as mock_exchange,
             patch("wereadit.app.push") as mock_push,
@@ -252,3 +246,21 @@ class TestMainTokenRefresh:
         kwargs = mock_exchange.call_args.kwargs
         assert kwargs["refresher"] is None
         assert kwargs["token_refreshed_at"] is None
+
+
+def test_main_calls_setup_logging():
+    from unittest.mock import patch
+
+    cfg = Config(
+        read_num=1, books=["b1"], chapters=["c1"],
+        headers={}, cookies={"wr_skey": "x"},
+    )
+    with patch("wereadit.app.load_config", return_value=cfg), \
+         patch("wereadit.app.HttpClient"), \
+         patch("wereadit.core.reader.read_books", return_value=_mock_read_result()), \
+         patch("wereadit.utils.logging.setup_logging") as mock_setup:
+        import wereadit.app as app_mod
+
+        app_mod.main()
+
+    mock_setup.assert_called_once()
