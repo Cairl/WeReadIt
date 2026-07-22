@@ -1,4 +1,4 @@
-"""reader 日志回显：进度去重 + synckey 常态日志简化（行为逻辑不变的回归保障）。"""
+"""reader 日志回显：进度走 logger + 预热阶段隔离 + synckey 常态日志简化。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def _make_cfg(**overrides) -> Config:
     return Config(**defaults)
 
 
-def _mock_response(json_data: dict, set_cookies: dict | None = None) -> MagicMock:
+def _mock_response(json_data, set_cookies=None):
     resp = MagicMock()
     resp.status_code = 200
     resp.json.return_value = json_data
@@ -30,49 +30,20 @@ def _mock_response(json_data: dict, set_cookies: dict | None = None) -> MagicMoc
     return resp
 
 
-class TestProgressDeduplication:
-    """进度打印：index 未变化时不重复打印。"""
+class TestProgressViaLogger:
+    """进度回显走 logger（统一格式），且 index 不变时不重复打印。"""
 
     @patch("wereadit.infra.http.requests.Session.post")
-    def test_progress_not_repeated_on_retry(self, mock_post: MagicMock) -> None:
-        """轮1修复未生效退避后，index 仍为 1，进度行不得二次打印。"""
+    def test_progress_not_repeated_on_retry(self, mock_post, caplog) -> None:
         renewal = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
         no_synckey = _mock_response({"succ": 1})
         fix_resp = _mock_response({})
         ok_resp = _mock_response({"succ": 1, "synckey": "abc"})
         mock_post.side_effect = [
             renewal,
-            no_synckey, fix_resp, no_synckey,  # 轮1：修复未生效，退避
-            ok_resp,  # 轮2（index 仍 1）：成功，index → 2
-            ok_resp,  # 轮3（index 2）：成功，index → 3 退出
-        ]
-
-        prints: list[str] = []
-        cfg = _make_cfg()
-        client = HttpClient(cookies={"wr_skey": "old"})
-        with patch("wereadit.core.reader.time.sleep"):
-            read_books(client, cfg, refresh_print=prints.append)
-
-        assert prints == [
-            "阅读进度: 第 1/2 次，已阅读 0.0 分钟",
-            "阅读进度: 第 2/2 次，已阅读 0.5 分钟",
-        ]
-
-
-class TestSynckeyLogPresentation:
-    """synckey 常态日志：合并为人话一行，级别随连续失败升级。"""
-
-    @patch("wereadit.infra.http.requests.Session.post")
-    def test_fix_log_merged_info_once(self, mock_post: MagicMock, caplog) -> None:
-        """首次修复：一行 INFO，不再有 WARNING 旧文案与第二行 INFO。"""
-        renewal = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
-        no_synckey = _mock_response({"succ": 1})
-        fix_resp = _mock_response({})
-        ok_resp = _mock_response({"succ": 1, "synckey": "abc"})
-        mock_post.side_effect = [
-            renewal,
-            no_synckey, fix_resp, ok_resp,  # 轮1：修复后重试成功
-            ok_resp,  # 轮2：成功退出
+            no_synckey, fix_resp, ok_resp,  # 预热：修复后重试成功
+            ok_resp,  # 主循环 read#1
+            ok_resp,  # 主循环 read#2
         ]
 
         cfg = _make_cfg()
@@ -83,12 +54,39 @@ class TestSynckeyLogPresentation:
         ):
             read_books(client, cfg)
 
-        messages = [r.message for r in caplog.records]
-        fix_logs = [m for m in messages if "已自动修复并重试" in m]
-        assert fix_logs == ["第 1/2 次：阅读上下文未同步，已自动修复并重试"]
-        assert not any("尝试修复" in m for m in messages)
-        assert not any("fix_no_synckey 已调用" in m for m in messages)
-        # 首次修复场景无 WARNING
+        progress = [r.message for r in caplog.records if r.message.startswith("阅读进度:")]
+        assert progress == [
+            "阅读进度: 第 1/2 次，已阅读 0.0 分钟",
+            "阅读进度: 第 2/2 次，已阅读 0.5 分钟",
+        ]
+
+
+class TestSynckeyLogPresentation:
+    @patch("wereadit.infra.http.requests.Session.post")
+    def test_fix_log_merged_info_once(self, mock_post, caplog) -> None:
+        renewal = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
+        no_synckey = _mock_response({"succ": 1})
+        fix_resp = _mock_response({})
+        ok_resp = _mock_response({"succ": 1, "synckey": "abc"})
+        mock_post.side_effect = [
+            renewal,
+            no_synckey, fix_resp, ok_resp,
+            ok_resp,
+            ok_resp,
+        ]
+
+        cfg = _make_cfg()
+        client = HttpClient(cookies={"wr_skey": "old"})
+        with (
+            patch("wereadit.core.reader.time.sleep"),
+            caplog.at_level(logging.INFO, logger="wereadit.core.reader"),
+        ):
+            read_books(client, cfg)
+
+        fix_logs = [m for m in caplog.messages if "已自动修复并重试" in m]
+        assert fix_logs == ["预热：阅读上下文未同步，已自动修复并重试"]
+        assert not any("尝试修复" in m for m in caplog.messages)
+        assert not any("fix_no_synckey 已调用" in m for m in caplog.messages)
         assert not any(
             r.levelno == logging.WARNING and "修复未生效" in r.message
             for r in caplog.records
@@ -96,18 +94,18 @@ class TestSynckeyLogPresentation:
 
     @patch("wereadit.infra.http.requests.Session.post")
     def test_backoff_info_then_warning_on_second_streak(
-        self, mock_post: MagicMock, caplog
+        self, mock_post, caplog
     ) -> None:
-        """修复未生效：streak=1 为 INFO，streak=2（逼近熔断）升 WARNING。"""
         renewal = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
         no_synckey = _mock_response({"succ": 1})
         fix_resp = _mock_response({})
         ok_resp = _mock_response({"succ": 1, "synckey": "abc"})
         mock_post.side_effect = [
             renewal,
-            no_synckey, fix_resp, no_synckey,  # 轮1：streak=1，退避
-            no_synckey, fix_resp, no_synckey,  # 轮2：streak=2，退避（WARNING）
-            ok_resp,  # 轮3：成功退出（streak 清零）
+            no_synckey, fix_resp, no_synckey,  # 预热轮1：streak=1，退避
+            no_synckey, fix_resp, no_synckey,  # 预热轮2：streak=2，退避（WARNING）
+            no_synckey, fix_resp, ok_resp,    # 预热轮3：修复后重试成功
+            ok_resp,                           # 主循环 read#1
         ]
 
         cfg = _make_cfg(read_num=1)
@@ -126,8 +124,7 @@ class TestSynckeyLogPresentation:
         assert "连续 2/3 次" in backoff[1].message
 
     @patch("wereadit.infra.http.requests.Session.post")
-    def test_fix_retry_success_log(self, mock_post: MagicMock, caplog) -> None:
-        """修复后重试成功：人话 INFO 行。"""
+    def test_fix_retry_success_log(self, mock_post, caplog) -> None:
         renewal = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
         no_synckey = _mock_response({"succ": 1})
         fix_resp = _mock_response({})
@@ -135,6 +132,7 @@ class TestSynckeyLogPresentation:
         mock_post.side_effect = [
             renewal,
             no_synckey, fix_resp, ok_resp,
+            ok_resp,
             ok_resp,
         ]
 
@@ -146,5 +144,5 @@ class TestSynckeyLogPresentation:
         ):
             read_books(client, cfg)
 
-        assert any("修复成功" in r.message for r in caplog.records)
+        assert any("预热：修复成功" in r.message for r in caplog.records)
         assert not any("synckey 修复成功" in r.message for r in caplog.records)

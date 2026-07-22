@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import enum
 import json
 import logging
 import random
@@ -133,19 +134,121 @@ def fix_no_synckey(client: HttpClient, cfg: Config) -> None:
         logger.warning("fix_no_synckey 请求失败：%s", exc)
 
 
-def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResult:
-    """执行阅读循环。
+class ReadStatus(enum.Enum):
+    """单次 read 的结果分类。"""
 
-    Args:
-        client: HTTP 客户端
-        cfg: 运行时配置
-        refresh_print: 可选的进度打印函数（行内刷新）
+    SYNCED = "synced"               # 首次尝试即含 synckey
+    SYNCED_VIA_FIX = "synced_via_fix"  # 无 synckey → fix 后重试成功
+    NO_SYNCKEY = "no_synckey"       # fix 后重试仍无 synckey
+    COOKIE_EXPIRED = "cookie_expired"  # 无 succ（cookie 失效）
+
+
+def _prepare_data(data: dict[str, Any], cfg: Config, last_time: int) -> int:
+    """构造单次 read 请求体并返回当前时间戳（保活字段全部保留）。"""
+    now = int(time.time())
+    data.pop("s", None)
+    data["b"] = random.choice(cfg.books) if cfg.books else data["b"]
+    data["c"] = random.choice(cfg.chapters) if cfg.chapters else data["c"]
+    data["ct"] = now
+    data["rt"] = now - last_time
+    data["ts"] = int(now * 1000) + random.randint(0, 1000)
+    data["rn"] = random.randint(0, 1000)
+    sign_request(data, SIGN_KEY)
+    return now
+
+
+def _read_once(
+    client: HttpClient, cfg: Config, data: dict[str, Any], last_time: int
+) -> tuple[ReadStatus, int, bool]:
+    """执行一次 read；无 synckey 时 fix 后内重试一次。
+
+    返回 (状态, 成功时间戳 or 本次时间戳, 是否经 fix 重试成功)。
+    """
+    now = _prepare_data(data, cfg, last_time)
+    res = client.post(
+        READ_URL,
+        data=json.dumps(data, separators=(",", ":")),
+        timeout=READ_TIMEOUT,
+    )
+    res_data = res.json()
+    if "succ" not in res_data:
+        return (ReadStatus.COOKIE_EXPIRED, now, False)
+    if "synckey" in res_data:
+        return (ReadStatus.SYNCED, now, False)
+    # 无 synckey → fix 后内重试一次
+    fix_no_synckey(client, cfg)
+    retry_now = _prepare_data(data, cfg, last_time)
+    retry_res = client.post(
+        READ_URL,
+        data=json.dumps(data, separators=(",", ":")),
+        timeout=READ_TIMEOUT,
+    )
+    retry_data = retry_res.json()
+    if "succ" in retry_data and "synckey" in retry_data:
+        return (ReadStatus.SYNCED_VIA_FIX, retry_now, True)
+    return (ReadStatus.NO_SYNCKEY, retry_now, False)
+
+
+def _warmup(client: HttpClient, cfg: Config, data: dict[str, Any]) -> tuple[int, int]:
+    """预热阶段：循环 _read_once 直到 synckey 出现，不计入阅读次数。
+
+    返回 (成功时的 last_time, 尝试次数)。熔断规则与主循环一致。
+    """
+    logger.info("开始预热：建立阅读上下文（不计入阅读次数）")
+    last_time = int(time.time()) - SECONDS_PER_READ
+    no_synckey_streak = 0
+    cookie_fail_streak = 0
+    attempts = 0
+    while True:
+        attempts += 1
+        status, now, via_fix = _read_once(client, cfg, data, last_time)
+        if status is ReadStatus.SYNCED or status is ReadStatus.SYNCED_VIA_FIX:
+            if via_fix:
+                logger.info("预热：阅读上下文未同步，已自动修复并重试")
+                logger.info("预热：修复成功，上下文已建立（尝试 %d 次）。", attempts)
+            else:
+                logger.info("预热成功，上下文已建立（尝试 %d 次）。", attempts)
+            return (now, attempts)
+        if status is ReadStatus.COOKIE_EXPIRED:
+            cookie_fail_streak += 1
+            if cookie_fail_streak >= MAX_COOKIE_FAIL:
+                msg = f"预热阶段连续 {MAX_COOKIE_FAIL} 次 cookie 过期，熔断退出。"
+                logger.error(msg)
+                raise CookieExpiredError(msg)
+            logger.warning("预热：cookie 已过期，尝试刷新...")
+            refresh_cookie(client, cfg)
+            time.sleep(CIRCUIT_BREAKER_BACKOFF)
+            continue
+        # NO_SYNCKEY
+        no_synckey_streak += 1
+        if no_synckey_streak >= MAX_NO_SYNCKEY:
+            msg = (
+                f"预热阶段连续 {MAX_NO_SYNCKEY} 次无 synckey 修复无效，任务中止"
+                f"（已完成 0/{cfg.read_num} 次）。请检查 WEREAD_WEB_CURL"
+            )
+            logger.error(msg)
+            raise ReadFailedError(msg)
+        logger.info("预热：阅读上下文未同步，已自动修复并重试")
+        backoff_log = (
+            logger.warning if no_synckey_streak >= MAX_NO_SYNCKEY - 1 else logger.info
+        )
+        backoff_log(
+            "预热：修复未生效，%ds 后重试（连续 %d/%d 次）",
+            CIRCUIT_BREAKER_BACKOFF,
+            no_synckey_streak,
+            MAX_NO_SYNCKEY,
+        )
+        time.sleep(CIRCUIT_BREAKER_BACKOFF)
+
+
+def read_books(client: HttpClient, cfg: Config) -> ReadResult:
+    """执行阅读循环。
 
     Returns:
         ReadResult：完成次数与累计分钟数
 
     Raises:
-        ReadFailedError: 连续 MAX_NO_SYNCKEY 次无 synckey（熔断）
+        ReadFailedError: 连续 MAX_NO_SYNCKEY 次无 synckey（预热或主循环熔断）
         CookieExpiredError: 连续 MAX_COOKIE_FAIL 次 cookie 过期（熔断）
 
     【保活策略 - 多项关键设计不能改】
@@ -156,128 +259,50 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
     - ts/rn jitter: 风控规避,不能去掉随机
     - sleep(READ_INTERVAL_SECONDS): 30 秒固定节奏,不能调快
     - 失败后不 sleep 不递增 index: 本次重试不计入进度
-    详见 wxread_keepalive_analysis.md 第七章调用链。
     """
-    # 初始 cookie 刷新（保留原行为：循环前先刷一次）
-    # 【保活策略】启动强制 refresh_cookie,不能删
+    # 启动强制刷新（【保活策略】不能删）
     refresh_cookie(client, cfg)
 
     data: dict[str, Any] = dict(DEFAULT_READ_DATA)
-    index = 1
-    # 【保活策略】last_time 初始偏移 30 秒,伪造"已读 30 秒",不能删
-    last_time = int(time.time()) - SECONDS_PER_READ
     total = cfg.read_num
     logger.info("需要阅读 %d 次。", total)
 
-    # 熔断计数器：连续失败次数（任一成功分支会清零对应计数器）
+    # 熔断计数器
     no_synckey_streak = 0
     cookie_fail_streak = 0
 
-    # 运行 metrics 累计计数器
+    # 运行 metrics 累计计数器（仅统计主循环 120 次；预热不计入）
     synckey_success = 0
     no_synckey_fix_triggered = 0
     fix_retry_success = 0
     cookie_refresh_count = 1  # 启动时已刷新 1 次
     circuit_breaker_triggered = False
+    warmup_attempts = 0
     last_printed_index = 0  # 进度打印去重：仅在 index 变化时打印
 
+    # 预热阶段：建立上下文，不计入阅读次数
+    last_time, warmup_attempts = _warmup(client, cfg, data)
+
+    # 主循环：120 次干净阅读
+    index = 1
     while index <= total:
-        # 【保活策略】删除上次签名,防止用旧 s 字段(服务器会拒)
-        data.pop("s", None)
-        # 【保活策略】b/c 随机选择,模拟"翻不同书不同章节",不能改成固定值
-        data["b"] = random.choice(cfg.books) if cfg.books else data["b"]
-        data["c"] = random.choice(cfg.chapters) if cfg.chapters else data["c"]
-        this_time = int(time.time())
-        data["ct"] = this_time
-        # 【保活策略】rt = this_time - last_time,约 30 秒,模拟真实阅读停留
-        data["rt"] = this_time - last_time
-        # 【保活策略】ts 加 0~1000ms jitter,rn 纯随机,防风控识别
-        data["ts"] = int(this_time * 1000) + random.randint(0, 1000)
-        data["rn"] = random.randint(0, 1000)
-        # 【保活策略】sg/s 签名,服务器校验请求合法性,不能改算法
-        sign_request(data, SIGN_KEY)
-
-        if refresh_print and index != last_printed_index:
-            last_printed_index = index
-            refresh_print(
-                f"阅读进度: 第 {index}/{total} 次，已阅读 {(index - 1) * 0.5:.1f} 分钟"
-            )
-        logger.debug("data: %s", data)
-
-        response = client.post(
-            READ_URL,
-            data=json.dumps(data, separators=(",", ":")),
-            timeout=READ_TIMEOUT,
-        )
-        res_data = response.json()
-        logger.debug("response: %s", res_data)
-
-        if "succ" in res_data:
-            # succ 分支：cookie 仍有效，清零 cookie 失败计数
-            cookie_fail_streak = 0
-            if "synckey" in res_data:
-                last_time = this_time
-                index += 1
-                no_synckey_streak = 0
-                synckey_success += 1
-                time.sleep(READ_INTERVAL_SECONDS)
-            else:
-                no_synckey_streak += 1
-                if no_synckey_streak >= MAX_NO_SYNCKEY:
-                    msg = (
-                        f"连续 {MAX_NO_SYNCKEY} 次无 synckey 修复无效，任务中止"
-                        f"（已完成 {index - 1}/{total} 次）。"
-                        "通常是 cookie 失效或触发风控，请检查 WEREAD_WEB_CURL"
-                    )
-                    logger.error(msg)
-                    circuit_breaker_triggered = True
-                    raise ReadFailedError(msg)
+        status, now, via_fix = _read_once(client, cfg, data, last_time)
+        if status is ReadStatus.SYNCED or status is ReadStatus.SYNCED_VIA_FIX:
+            last_time = now
+            if index != last_printed_index:
+                last_printed_index = index
                 logger.info(
-                    "第 %d/%d 次：阅读上下文未同步，已自动修复并重试", index, total
+                    "阅读进度: 第 %d/%d 次，已阅读 %.1f 分钟",
+                    index, total, (index - 1) * 0.5,
                 )
-                fix_no_synckey(client, cfg)
-                no_synckey_fix_triggered += 1
-                # 修复后立即重试一次 read（重新签名，因为 ts/rn 需要更新）
-                # 这样不会丢失本次阅读进度
-                retry_time = int(time.time())
-                data["ct"] = retry_time
-                data["rt"] = retry_time - last_time
-                data["ts"] = int(retry_time * 1000) + random.randint(0, 1000)
-                data["rn"] = random.randint(0, 1000)
-                sign_request(data, SIGN_KEY)
-                retry_response = client.post(
-                    READ_URL,
-                    data=json.dumps(data, separators=(",", ":")),
-                    timeout=READ_TIMEOUT,
-                )
-                retry_data = retry_response.json()
-                if "synckey" in retry_data:
-                    logger.info("第 %d/%d 次：修复成功，继续阅读", index, total)
-                    last_time = retry_time
-                    index += 1
-                    no_synckey_streak = 0
-                    synckey_success += 1
-                    fix_retry_success += 1
-                    time.sleep(READ_INTERVAL_SECONDS)
-                    continue
-                # 重试仍无 synckey，短暂退避后进入下一轮循环
-                backoff_log = (
-                    logger.warning
-                    if no_synckey_streak >= MAX_NO_SYNCKEY - 1
-                    else logger.info
-                )
-                backoff_log(
-                    "第 %d/%d 次：修复未生效，%ds 后重试（连续 %d/%d 次）",
-                    index,
-                    total,
-                    CIRCUIT_BREAKER_BACKOFF,
-                    no_synckey_streak,
-                    MAX_NO_SYNCKEY,
-                )
-                time.sleep(CIRCUIT_BREAKER_BACKOFF)
-        else:
-            # 无 succ：cookie 过期，清零 synckey 计数
-            no_synckey_streak = 0
+            index += 1
+            synckey_success += 1
+            if via_fix:
+                fix_retry_success += 1
+                logger.info("第 %d/%d 次：修复成功，继续阅读", index - 1, total)
+            time.sleep(READ_INTERVAL_SECONDS)
+            continue
+        if status is ReadStatus.COOKIE_EXPIRED:
             cookie_fail_streak += 1
             if cookie_fail_streak >= MAX_COOKIE_FAIL:
                 msg = (
@@ -291,6 +316,29 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
             refresh_cookie(client, cfg)
             cookie_refresh_count += 1
             time.sleep(CIRCUIT_BREAKER_BACKOFF)
+            continue
+        # NO_SYNCKEY（预热后应极少发生；保留兜底）
+        no_synckey_streak += 1
+        no_synckey_fix_triggered += 1
+        if no_synckey_streak >= MAX_NO_SYNCKEY:
+            msg = (
+                f"连续 {MAX_NO_SYNCKEY} 次无 synckey 修复无效，任务中止"
+                f"（已完成 {index - 1}/{total} 次）。"
+                "通常是 cookie 失效或触发风控，请检查 WEREAD_WEB_CURL"
+            )
+            logger.error(msg)
+            circuit_breaker_triggered = True
+            raise ReadFailedError(msg)
+        logger.info("第 %d/%d 次：阅读上下文未同步，已自动修复并重试", index, total)
+        backoff_log = (
+            logger.warning if no_synckey_streak >= MAX_NO_SYNCKEY - 1 else logger.info
+        )
+        backoff_log(
+            "第 %d/%d 次：修复未生效，%ds 后重试（连续 %d/%d 次）",
+            index, total, CIRCUIT_BREAKER_BACKOFF,
+            no_synckey_streak, MAX_NO_SYNCKEY,
+        )
+        time.sleep(CIRCUIT_BREAKER_BACKOFF)
 
     logger.info("阅读脚本已完成。")
     return ReadResult(
@@ -301,4 +349,6 @@ def read_books(client: HttpClient, cfg: Config, refresh_print=None) -> ReadResul
         fix_retry_success=fix_retry_success,
         cookie_refresh_count=cookie_refresh_count,
         circuit_breaker_triggered=circuit_breaker_triggered,
+        warmup_done=True,
+        warmup_attempts=warmup_attempts,
     )
