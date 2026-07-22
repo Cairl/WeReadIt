@@ -282,7 +282,7 @@ class TestExchangeLogging:
     def test_exchange_start_logs_token_preview(
         self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """兑换开始时应记录 token 前 8 位、平台、vid。"""
+        """兑换开始时应记录 token 前 8 位、平台，且 vid 脱敏（前 4 位）。"""
         cfg = _make_cfg(app_token="abcdefgh1234567890")
         query_resp = _mock_award_data()
         mock_response = MagicMock()
@@ -293,12 +293,14 @@ class TestExchangeLogging:
         with caplog.at_level(logging.INFO, logger="wereadit.core.exchanger"):
             exchange_awards(mock_client, cfg)
 
-        # 验证 INFO 日志中包含 token 前 8 位、平台、vid
+        # 验证 INFO 日志中包含 token 前 8 位、平台，vid 脱敏为前 4 位
         assert "abcdefgh" in caplog.text
         assert "Android" in caplog.text
-        assert "12345" in caplog.text
+        assert "1234****" in caplog.text
         # 完整 token 不应出现在日志中（脱敏）
         assert "abcdefgh1234567890" not in caplog.text
+        # 完整 vid 不应出现在日志中（公开仓库 Actions 日志任何人可见，PII 脱敏）
+        assert "12345" not in caplog.text
 
     def test_token_expired_logs_warning_with_preview(
         self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture

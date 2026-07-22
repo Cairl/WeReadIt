@@ -185,9 +185,11 @@ def exchange_awards(
 
     # 排查 token 过快过期：记录本次使用的 token 前 8 位，便于对应 GitHub Secrets
     token_preview = auth_token[:8] if auth_token else ""
+    # vid 是账号身份 ID（PII），公开仓库的 Actions 日志任何人可见，只回显前 4 位打码
+    vid_preview = f"{vid[:4]}****" if len(vid) > 4 else "****"
     logger.info(
         "兑换开始: 平台=%s, vid=%s, token=%s...",
-        platform_name, vid, token_preview,
+        platform_name, vid_preview, token_preview,
     )
 
     # 查询

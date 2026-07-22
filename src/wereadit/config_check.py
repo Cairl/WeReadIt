@@ -30,7 +30,10 @@ def _check_web_curl(cfg: Config) -> tuple[bool, str]:
             f"[异常] WEREAD_WEB_CURL：cookie 中缺少 {', '.join(missing)}，"
             "请重新抓取完整 read 请求"
         )
-    return True, f"[正常] WEREAD_WEB_CURL：解析成功，vid={cfg.cookies['wr_vid']}"
+    # vid 是账号身份 ID（PII），报告会 logger.info 到 Actions 日志（公开仓库任何人可见），脱敏前 4 位
+    vid = cfg.cookies["wr_vid"]
+    vid_preview = f"{vid[:4]}****" if len(vid) > 4 else "****"
+    return True, f"[正常] WEREAD_WEB_CURL：解析成功，vid={vid_preview}"
 
 
 def _check_app_curl(cfg: Config) -> tuple[bool, str]:
