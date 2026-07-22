@@ -277,7 +277,6 @@ def read_books(client: HttpClient, cfg: Config) -> ReadResult:
     fix_retry_success = 0
     cookie_refresh_count = 1  # 启动时已刷新 1 次
     circuit_breaker_triggered = False
-    warmup_attempts = 0
     last_printed_index = 0  # 进度打印去重：仅在 index 变化时打印
 
     # 预热阶段：建立上下文，不计入阅读次数

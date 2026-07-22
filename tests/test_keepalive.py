@@ -160,8 +160,9 @@ class TestCircuitBreaker:
     def _setup_continuous_no_synckey(self, mock_post) -> None:
         """让所有 read/retry 都返回 succ 但无 synckey,fix 返回空。
 
-        P1.1 后循环逻辑:read → 无synckey → fix → retry_read → 无synckey → 下一轮
-        第 3 次原始 read 无 synckey 时熔断(不 fix 不 retry)。
+        新熔断模型:每轮 _read_once 都 ALWAYS 先 fix 再 retry;
+        仅当 3 轮(MAX_NO_SYNCKEY)的 retry 仍无 synckey 时,
+        no_synckey_streak >= 3 才触发熔断。这里构造 3 轮完整失败。
         """
         renewal_resp = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
         no_synckey_resp = _mock_response({"succ": 1})  # 无 synckey
@@ -232,6 +233,56 @@ class TestCircuitBreaker:
         assert result.completed_count == 2
         assert result.fix_retry_success == 0, "预热阶段的 fix 重试不计入主循环 metrics"
 
+    @patch("wereadit.infra.http.requests.Session.post")
+    def test_no_synckey_streak_resets_between_successes(self, mock_post) -> None:
+        """3 次零散无 synckey 事件(每次后都有成功)不得触发熔断。
+
+        新熔断模型(commit 6c4a9a0 恢复):no_synckey_streak 仅累计"连续"
+        无 synckey 的轮次;任何一次成功(synckey)都清零。因此 3 次被成功
+        分隔的无 synckey 事件不会使累计达到 MAX_NO_SYNCKEY。
+
+        read_num=3,需考虑预热阶段自身消耗 read 响应:
+        - renewal
+        - 预热: read 无synckey → fix → retry ok (3 响应,建立上下文)
+        - 主#1: 无synckey事件(read+fix+retry 仍无synckey,streak=1)
+        - 主#2: 成功,重置 streak(completed=1)
+        - 主#3: 无synckey事件(streak=1)
+        - 主#4: 成功,重置 streak(completed=2)
+        - 主#5: 无synckey事件(streak=1)
+        - 主#6: 成功,重置 streak(completed=3)
+        若移除 streak 重置,累计会到 3 → 熔断抛 ReadFailedError。
+        """
+        renewal_resp = _mock_response(
+            {"succ": 1}, set_cookies={"wr_skey": "new12345"}
+        )
+        ok_resp = _mock_response({"succ": 1, "synckey": 1})
+        no_synckey_resp = _mock_response({"succ": 1})
+        fix_resp = _mock_response({})
+        mock_post.side_effect = [
+            renewal_resp,                                  # 启动刷新
+            # 预热：read 无synckey → fix → retry ok
+            no_synckey_resp, fix_resp, ok_resp,
+            # 主循环 read#1: 无synckey事件(fix+retry 仍无synckey)
+            no_synckey_resp, fix_resp, no_synckey_resp,
+            # 主循环 read#2: 成功,重置 streak
+            ok_resp,
+            # 主循环 read#3: 无synckey事件
+            no_synckey_resp, fix_resp, no_synckey_resp,
+            # 主循环 read#4: 成功,重置 streak
+            ok_resp,
+            # 主循环 read#5: 无synckey事件
+            no_synckey_resp, fix_resp, no_synckey_resp,
+            # 主循环 read#6: 成功,重置 streak
+            ok_resp,
+        ]
+        cfg = _make_cfg(read_num=3)
+        client = HttpClient(cookies={"wr_skey": "old"})
+
+        with patch("wereadit.core.reader.time.sleep"):
+            result = read_books(client, cfg)
+
+        assert result.completed_count == 3, "3 次成功完成,不应因零散无synckey熔断"
+
 
 # =========================================================================
 # 保活策略核心行为回归测试
@@ -294,8 +345,9 @@ class TestKeepaliveStrategies:
     def test_fix_no_synckey_called_when_missing_synckey(self, mock_post) -> None:
         """策略 #9: 无 synckey 时调 fix_no_synckey。
 
-        P1.1 后:read 无synckey → fix → retry_read(也无synckey) → 下一轮
-        第 3 次原始 read 无 synckey 时熔断(不 fix 不 retry)。
+        新熔断模型:每轮 _read_once 都 ALWAYS 先 fix 再 retry;
+        仅当 3 轮(MAX_NO_SYNCKEY)的 retry 仍无 synckey 时,
+        no_synckey_streak >= 3 触发熔断,而不是"第 3 次原始 read 即熔断"。
         """
         renewal_resp = _mock_response({"succ": 1}, set_cookies={"wr_skey": "new12345"})
         no_synckey_resp = _mock_response({"succ": 1})
