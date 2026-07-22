@@ -289,6 +289,8 @@ def read_books(client: HttpClient, cfg: Config) -> ReadResult:
         status, now, via_fix = _read_once(client, cfg, data, last_time)
         if status is ReadStatus.SYNCED or status is ReadStatus.SYNCED_VIA_FIX:
             last_time = now
+            no_synckey_streak = 0
+            cookie_fail_streak = 0
             if index != last_printed_index:
                 last_printed_index = index
                 logger.info(
@@ -303,6 +305,7 @@ def read_books(client: HttpClient, cfg: Config) -> ReadResult:
             time.sleep(READ_INTERVAL_SECONDS)
             continue
         if status is ReadStatus.COOKIE_EXPIRED:
+            no_synckey_streak = 0
             cookie_fail_streak += 1
             if cookie_fail_streak >= MAX_COOKIE_FAIL:
                 msg = (
