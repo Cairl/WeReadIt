@@ -26,6 +26,10 @@ class ReadResult:
     cookie_refresh_count: int = 0  # refresh_cookie 触发次数(含启动 1 次)
     circuit_breaker_triggered: bool = False  # 是否触发熔断
 
+    # 预热阶段（不计阅读次数）
+    warmup_done: bool = False  # 预热是否成功建立上下文
+    warmup_attempts: int = 0  # 预热尝试次数
+
     @property
     def is_full_completed(self) -> bool:
         """是否完成了全部阅读次数（由调用方判断阈值）。"""
@@ -38,6 +42,7 @@ class ReadResult:
             f"fix 触发 {self.no_synckey_fix_triggered} 次 / "
             f"fix 重试成功 {self.fix_retry_success} 次 / "
             f"cookie 刷新 {self.cookie_refresh_count} 次"
+            f"{' / 预热成功(尝试 ' + str(self.warmup_attempts) + ' 次)' if self.warmup_done else ''}"
         )
 
 
