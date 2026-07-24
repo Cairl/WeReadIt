@@ -56,8 +56,8 @@ class TestProgressViaLogger:
 
         progress = [r.message for r in caplog.records if r.message.startswith("阅读进度:")]
         assert progress == [
-            "阅读进度: 第 1/2 次，已阅读 0.0 分钟",
-            "阅读进度: 第 2/2 次，已阅读 0.5 分钟",
+            "阅读进度: 第 1/2 次，当前阅读 0.5 分钟",
+            "阅读进度: 第 2/2 次，当前阅读 1.0 分钟",
         ]
 
 
@@ -83,8 +83,10 @@ class TestSynckeyLogPresentation:
         ):
             read_books(client, cfg)
 
-        fix_logs = [m for m in caplog.messages if "已自动修复并重试" in m]
-        assert fix_logs == ["预热：阅读上下文未同步，已自动修复并重试"]
+        # 预热成功时只打印"开始预热"和"预热成功"，不打印修复细节
+        assert any(m == "开始预热" for m in caplog.messages)
+        assert any(m == "预热成功" for m in caplog.messages)
+        assert not any("已自动修复并重试" in m for m in caplog.messages)
         assert not any("尝试修复" in m for m in caplog.messages)
         assert not any("fix_no_synckey 已调用" in m for m in caplog.messages)
         assert not any(
@@ -144,5 +146,5 @@ class TestSynckeyLogPresentation:
         ):
             read_books(client, cfg)
 
-        assert any("预热：修复成功" in r.message for r in caplog.records)
+        assert any("预热成功" in r.message for r in caplog.records)
         assert not any("synckey 修复成功" in r.message for r in caplog.records)

@@ -185,12 +185,6 @@ def exchange_awards(
 
     # 排查 token 过快过期：记录本次使用的 token 前 8 位，便于对应 GitHub Secrets
     token_preview = auth_token[:8] if auth_token else ""
-    # vid 是账号身份 ID（PII），公开仓库的 Actions 日志任何人可见，只回显前 4 位打码
-    vid_preview = f"{vid[:4]}****" if len(vid) > 4 else "****"
-    logger.info(
-        "兑换开始: 平台=%s, vid=%s, token=%s...",
-        platform_name, vid_preview, token_preview,
-    )
 
     # 查询
     query_body = {
@@ -219,13 +213,6 @@ def exchange_awards(
     reading_day = award_data.get("readingDay", 0)
     raw_awards = award_data.get("readtimeAwards", []) + award_data.get("readdayAwards", [])
     awards = [Award.from_dict(a) for a in raw_awards]
-
-    logger.info(
-        "本周阅读 %d 天, %.1f 小时, 共 %d 个奖励",
-        reading_day,
-        reading_time / 3600,
-        len(awards),
-    )
 
     # 逐个兑换
     exchanged_card = 0
@@ -316,7 +303,6 @@ def exchange_awards(
             logger.error("兑换 %s 失败（重试 %d 次）", award.award_level_desc, EXCHANGE_MAX_RETRY)
             failed += 1
 
-    logger.info("阅读奖励兑换完成 (%s)", platform_name)
     summary = (
         f"阅读奖励兑换完成 ({platform_name})\n"
         f"本周阅读: {reading_day} 天 / {reading_time / 3600:.1f} 小时\n"

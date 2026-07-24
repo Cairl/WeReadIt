@@ -62,12 +62,10 @@ def refresh_cookie(client: HttpClient, cfg: Config) -> str:
     - read 失败后刷新:被动续期,继续本次循环(不 sleep 不递增 index)
     详见 wxread_keepalive_analysis.md 第 4.1 节。
     """
-    logger.info("刷新 cookie")
     new_skey = _get_wr_skey(client, cfg)
     if new_skey:
         client.update_cookie("wr_skey", new_skey)
-        logger.info("密钥刷新成功，新密钥：%s***", new_skey[:2])
-        logger.info("重新本次阅读。")
+        logger.info("密钥刷新成功：%s***", new_skey[:2])
         return new_skey
 
     err_msg = "无法获取新密钥或者 WEREADIT_CURL_BASH 配置有误，终止运行。"
@@ -194,7 +192,7 @@ def _warmup(client: HttpClient, cfg: Config, data: dict[str, Any]) -> tuple[int,
 
     返回 (成功时的 last_time, 尝试次数)。熔断规则与主循环一致。
     """
-    logger.info("开始预热：建立阅读上下文（不计入阅读次数）")
+    logger.info("开始预热")
     last_time = int(time.time()) - SECONDS_PER_READ
     no_synckey_streak = 0
     cookie_fail_streak = 0
@@ -203,11 +201,7 @@ def _warmup(client: HttpClient, cfg: Config, data: dict[str, Any]) -> tuple[int,
         attempts += 1
         status, now, via_fix = _read_once(client, cfg, data, last_time)
         if status is ReadStatus.SYNCED or status is ReadStatus.SYNCED_VIA_FIX:
-            if via_fix:
-                logger.info("预热：阅读上下文未同步，已自动修复并重试")
-                logger.info("预热：修复成功，上下文已建立（尝试 %d 次）。", attempts)
-            else:
-                logger.info("预热成功，上下文已建立（尝试 %d 次）。", attempts)
+            logger.info("预热成功")
             return (now, attempts)
         if status is ReadStatus.COOKIE_EXPIRED:
             cookie_fail_streak += 1
@@ -228,7 +222,6 @@ def _warmup(client: HttpClient, cfg: Config, data: dict[str, Any]) -> tuple[int,
             )
             logger.error(msg)
             raise ReadFailedError(msg)
-        logger.info("预热：阅读上下文未同步，已自动修复并重试")
         backoff_log = (
             logger.warning if no_synckey_streak >= MAX_NO_SYNCKEY - 1 else logger.info
         )
@@ -293,8 +286,8 @@ def read_books(client: HttpClient, cfg: Config) -> ReadResult:
             if index != last_printed_index:
                 last_printed_index = index
                 logger.info(
-                    "阅读进度: 第 %d/%d 次，已阅读 %.1f 分钟",
-                    index, total, (index - 1) * 0.5,
+                    "阅读进度: 第 %d/%d 次，当前阅读 %.1f 分钟",
+                    index, total, index * 0.5,
                 )
             index += 1
             synckey_success += 1

@@ -98,6 +98,7 @@ def push(
 
 # 触发各渠道模块导入，完成注册（必须放在注册表定义之后）
 from wereadit.push import (  # noqa: E402
+    bark,  # noqa: F401
     pushplus,  # noqa: F401
     serverchan,  # noqa: F401
     telegram,  # noqa: F401

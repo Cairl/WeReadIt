@@ -26,6 +26,7 @@ def _make_cfg(**overrides) -> Config:
         telegram_bot_token="",
         telegram_chat_id="",
         serverchan_spt="",
+        bark_key="",
         weread_app_curl="",
         app_token="",
         app_token_key="",
@@ -40,8 +41,10 @@ def _make_cfg(**overrides) -> Config:
 
 class TestRegistry:
     def test_all_channels_registered(self) -> None:
-        """4 个渠道都应已注册。"""
-        assert set(_PUSHERS.keys()) == {"pushplus", "wxpusher", "telegram", "serverchan"}
+        """5 个渠道都应已注册。"""
+        assert set(_PUSHERS.keys()) == {
+            "pushplus", "wxpusher", "telegram", "serverchan", "bark"
+        }
 
     def test_get_pusher_unknown_method(self, mock_client: MagicMock) -> None:
         """未知渠道返回 None。"""
@@ -89,6 +92,28 @@ class TestPushFunction:
         body = kwargs["json"]
         assert body["token"] == "tok"
         assert "成功" in body["title"]
+
+    def test_push_bark_success(self, mock_client: MagicMock) -> None:
+        """bark 推送应 POST 到 {server}/{device_key}，body 含 title/body。"""
+        cfg = _make_cfg(bark_key="device_key_123")
+        result = push("hello", "bark", mock_client, cfg)
+        assert result is True
+        mock_client.post.assert_called_once()
+        args, kwargs = mock_client.post.call_args
+        assert "api.day.app/device_key_123" in args[0]
+        body = kwargs["json"]
+        assert "成功" in body["title"]
+        assert body["body"] == "hello"
+
+    def test_push_bark_custom_server(self, mock_client: MagicMock) -> None:
+        """BARK_SERVER 自建服务器应覆盖默认地址。"""
+        from wereadit.constants import BARK_DEFAULT_SERVER
+        cfg = _make_cfg(bark_key="key", bark_server="https://bark.example.com")
+        result = push("hi", "bark", mock_client, cfg)
+        assert result is True
+        args, _ = mock_client.post.call_args
+        assert "bark.example.com/key" in args[0]
+        assert BARK_DEFAULT_SERVER == "https://api.day.app"
 
 
 class TestPusherBase:

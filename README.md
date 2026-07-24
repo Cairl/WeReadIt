@@ -9,7 +9,7 @@
 - 自动阅读（默认 60 分钟，可配置）
 - Cookie 自动刷新，部署后长期运行
 - 自动兑换每周阅读奖励（书币 / 无限卡，可选）
-- 支持 PushPlus、WxPusher、Telegram、ServerChan 推送
+- 支持 PushPlus、WxPusher、Telegram、ServerChan、Bark 推送
 - 支持 GitHub Actions、服务器定时任务
 
 ## 快速开始
@@ -40,6 +40,8 @@
 | `TELEGRAM_BOT_TOKEN` | Secret | 选填 | -      | Telegram Bot token（需同时配置 CHAT_ID） |
 | `TELEGRAM_CHAT_ID`   | Secret | 选填 | -      | Telegram 会话 ID（需同时配置 BOT_TOKEN） |
 | `SERVERCHAN`         | Secret | 选填 | -      | ServerChan 推送 token                   |
+| `BARK`               | Secret | 选填 | -      | Bark 推送 device key                     |
+| `BARK_SERVER`        | Variable | 选填 | `https://api.day.app` | Bark 服务器地址（自建时填写） |
 
 ## 配置（三步走）
 

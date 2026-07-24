@@ -274,33 +274,12 @@ class TestExchangeLogging:
     """排查 token 过快过期：验证兑换流程的关键日志输出。
 
     覆盖 2026-07-21 新增的排查日志：
-    - 兑换开始时记录 token 前 8 位、平台、vid
     - Token 过期时记录 WARNING 日志，包含 token 前 8 位
     - 兑换接口失败时记录 HTTP 状态码、errcode、errmsg、响应体片段
+
+    注意：兑换开始的 INFO 日志（平台/vid/token）与本周阅读统计 INFO 日志
+    已于 2026-07-25 简化删除，正常流程只保留"兑换 X 成功: Y Z"结果行。
     """
-
-    def test_exchange_start_logs_token_preview(
-        self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """兑换开始时应记录 token 前 8 位、平台，且 vid 脱敏（前 4 位）。"""
-        cfg = _make_cfg(app_token="abcdefgh1234567890")
-        query_resp = _mock_award_data()
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = query_resp
-        mock_client.post.return_value = mock_response
-
-        with caplog.at_level(logging.INFO, logger="wereadit.core.exchanger"):
-            exchange_awards(mock_client, cfg)
-
-        # 验证 INFO 日志中包含 token 前 8 位、平台，vid 脱敏为前 4 位
-        assert "abcdefgh" in caplog.text
-        assert "Android" in caplog.text
-        assert "1234****" in caplog.text
-        # 完整 token 不应出现在日志中（脱敏）
-        assert "abcdefgh1234567890" not in caplog.text
-        # 完整 vid 不应出现在日志中（公开仓库 Actions 日志任何人可见，PII 脱敏）
-        assert "12345" not in caplog.text
 
     def test_token_expired_logs_warning_with_preview(
         self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
