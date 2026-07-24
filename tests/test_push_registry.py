@@ -115,6 +115,25 @@ class TestPushFunction:
         assert "bark.example.com/key" in args[0]
         assert BARK_DEFAULT_SERVER == "https://api.day.app"
 
+    def test_push_bark_full_url(self, mock_client: MagicMock) -> None:
+        """token 是完整 URL 时直接用，忽略 bark_server。"""
+        cfg = _make_cfg(
+            bark_key="https://api.day.app/aZybLbnT5XhyUhkPxLBQGn",
+            bark_server="https://bark.example.com",
+        )
+        result = push("hi", "bark", mock_client, cfg)
+        assert result is True
+        args, _ = mock_client.post.call_args
+        assert args[0] == "https://api.day.app/aZybLbnT5XhyUhkPxLBQGn"
+
+    def test_push_bark_full_url_trailing_slash(self, mock_client: MagicMock) -> None:
+        """完整 URL 末尾带斜杠时应去除。"""
+        cfg = _make_cfg(bark_key="https://api.day.app/aZybLbnT5XhyUhkPxLBQGn/")
+        result = push("hi", "bark", mock_client, cfg)
+        assert result is True
+        args, _ = mock_client.post.call_args
+        assert args[0] == "https://api.day.app/aZybLbnT5XhyUhkPxLBQGn"
+
 
 class TestPusherBase:
     def test_pusher_abc_cannot_instantiate(self, mock_client: MagicMock) -> None:

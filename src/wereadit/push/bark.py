@@ -27,8 +27,14 @@ class BarkPusher(Pusher):
 
     @with_retry()
     def send(self, content: str, is_success: bool = True) -> bool:
-        server = self.cfg.bark_server.rstrip("/")
-        url = f"{server}/{self.token}"
+        # token 既可以是纯 device_key（配合 bark_server 拼接），
+        # 也可以是完整 URL（https://api.day.app/<key>[/]），自动识别
+        token = (self.token or "").strip()
+        if token.startswith(("http://", "https://")):
+            url = token.rstrip("/")
+        else:
+            server = self.cfg.bark_server.rstrip("/")
+            url = f"{server}/{token.strip('/')}"
         title = f"WeReadIt-{'成功' if is_success else '失败'}"
         response = self.client.post(
             url,
