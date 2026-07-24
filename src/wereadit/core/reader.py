@@ -68,7 +68,7 @@ def refresh_cookie(client: HttpClient, cfg: Config) -> str:
         logger.info("密钥刷新成功：%s***", new_skey[:2])
         return new_skey
 
-    err_msg = "无法获取新密钥或者 WEREADIT_CURL_BASH 配置有误，终止运行。"
+    err_msg = "无法获取新密钥或者 WEREADIT_CURL_BASH 配置有误，终止运行"
     logger.error(err_msg)
     raise CookieExpiredError(err_msg)
 
@@ -192,7 +192,7 @@ def _warmup(client: HttpClient, cfg: Config, data: dict[str, Any]) -> tuple[int,
 
     返回 (成功时的 last_time, 尝试次数)。熔断规则与主循环一致。
     """
-    logger.info("正在阅读预热")
+    logger.info("正在准备阅读")
     last_time = int(time.time()) - SECONDS_PER_READ
     no_synckey_streak = 0
     cookie_fail_streak = 0
@@ -207,7 +207,7 @@ def _warmup(client: HttpClient, cfg: Config, data: dict[str, Any]) -> tuple[int,
             cookie_fail_streak += 1
             if cookie_fail_streak >= MAX_COOKIE_FAIL:
                 logger.error("阅读预热失败")
-                msg = f"预热阶段连续 {MAX_COOKIE_FAIL} 次 cookie 过期，熔断退出。"
+                msg = f"预热阶段连续 {MAX_COOKIE_FAIL} 次 cookie 过期，熔断退出"
                 logger.error(msg)
                 raise CookieExpiredError(msg)
             logger.warning("预热：cookie 已过期，尝试刷新...")
@@ -260,7 +260,7 @@ def read_books(client: HttpClient, cfg: Config) -> ReadResult:
 
     data: dict[str, Any] = dict(DEFAULT_READ_DATA)
     total = cfg.read_num
-    logger.info("需要阅读 %d 次。", total)
+    logger.info("目标阅读次数: %d 次", total)
 
     # 熔断计数器
     no_synckey_streak = 0
@@ -304,7 +304,7 @@ def read_books(client: HttpClient, cfg: Config) -> ReadResult:
             if cookie_fail_streak >= MAX_COOKIE_FAIL:
                 msg = (
                     f"连续 {MAX_COOKIE_FAIL} 次 cookie 过期，熔断退出。"
-                    f"已完成 {index - 1}/{total} 次。"
+                    f"已完成 {index - 1}/{total} 次"
                 )
                 logger.error(msg)
                 circuit_breaker_triggered = True
@@ -337,7 +337,7 @@ def read_books(client: HttpClient, cfg: Config) -> ReadResult:
         )
         time.sleep(CIRCUIT_BREAKER_BACKOFF)
 
-    logger.info("阅读脚本已完成。")
+    logger.info("阅读脚本已完成")
     return ReadResult(
         completed_count=index - 1,
         total_minutes=(index - 1) * 0.5,

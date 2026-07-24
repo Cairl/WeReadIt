@@ -83,8 +83,8 @@ class TestSynckeyLogPresentation:
         ):
             read_books(client, cfg)
 
-        # 预热成功时只打印"正在阅读预热"，不打印"预热成功"，也不打印修复细节
-        assert any(m == "正在阅读预热" for m in caplog.messages)
+        # 预热成功时只打印"正在准备阅读"，不打印"预热成功"，也不打印修复细节
+        assert any(m == "正在准备阅读" for m in caplog.messages)
         assert not any("预热成功" in m for m in caplog.messages)
         assert not any("已自动修复并重试" in m for m in caplog.messages)
         assert not any("尝试修复" in m for m in caplog.messages)
