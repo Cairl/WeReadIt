@@ -83,9 +83,9 @@ class TestSynckeyLogPresentation:
         ):
             read_books(client, cfg)
 
-        # 预热成功时只打印"开始预热"和"预热成功"，不打印修复细节
-        assert any(m == "开始预热" for m in caplog.messages)
-        assert any(m == "预热成功" for m in caplog.messages)
+        # 预热成功时只打印"正在阅读预热"，不打印"预热成功"，也不打印修复细节
+        assert any(m == "正在阅读预热" for m in caplog.messages)
+        assert not any("预热成功" in m for m in caplog.messages)
         assert not any("已自动修复并重试" in m for m in caplog.messages)
         assert not any("尝试修复" in m for m in caplog.messages)
         assert not any("fix_no_synckey 已调用" in m for m in caplog.messages)
@@ -146,5 +146,5 @@ class TestSynckeyLogPresentation:
         ):
             read_books(client, cfg)
 
-        assert any("预热成功" in r.message for r in caplog.records)
+        assert not any("预热成功" in r.message for r in caplog.records)
         assert not any("synckey 修复成功" in r.message for r in caplog.records)

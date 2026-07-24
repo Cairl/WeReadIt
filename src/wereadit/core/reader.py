@@ -192,7 +192,7 @@ def _warmup(client: HttpClient, cfg: Config, data: dict[str, Any]) -> tuple[int,
 
     返回 (成功时的 last_time, 尝试次数)。熔断规则与主循环一致。
     """
-    logger.info("开始预热")
+    logger.info("正在阅读预热")
     last_time = int(time.time()) - SECONDS_PER_READ
     no_synckey_streak = 0
     cookie_fail_streak = 0
@@ -201,11 +201,12 @@ def _warmup(client: HttpClient, cfg: Config, data: dict[str, Any]) -> tuple[int,
         attempts += 1
         status, now, via_fix = _read_once(client, cfg, data, last_time)
         if status is ReadStatus.SYNCED or status is ReadStatus.SYNCED_VIA_FIX:
-            logger.info("预热成功")
+            # 预热成功：不打印"预热成功"，直接由主循环输出"阅读进度"
             return (now, attempts)
         if status is ReadStatus.COOKIE_EXPIRED:
             cookie_fail_streak += 1
             if cookie_fail_streak >= MAX_COOKIE_FAIL:
+                logger.error("阅读预热失败")
                 msg = f"预热阶段连续 {MAX_COOKIE_FAIL} 次 cookie 过期，熔断退出。"
                 logger.error(msg)
                 raise CookieExpiredError(msg)
@@ -216,6 +217,7 @@ def _warmup(client: HttpClient, cfg: Config, data: dict[str, Any]) -> tuple[int,
         # NO_SYNCKEY
         no_synckey_streak += 1
         if no_synckey_streak >= MAX_NO_SYNCKEY:
+            logger.error("阅读预热失败")
             msg = (
                 f"预热阶段连续 {MAX_NO_SYNCKEY} 次无 synckey 修复无效，任务中止"
                 f"（已完成 0/{cfg.read_num} 次）。请检查 WEREAD_WEB_CURL"
