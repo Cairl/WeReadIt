@@ -180,7 +180,7 @@ def load_config() -> Config:
         telegram_bot_token=_env("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=_env("TELEGRAM_CHAT_ID"),
         serverchan_spt=_env_renamed("SERVERCHAN", "SERVERCHAN_SPT"),
-        bark_key=_env_renamed("BARK", "BARK_KEY"),
+        bark_key=_env("BARK_PUSHER"),
         bark_server=_env("BARK_SERVER", BARK_DEFAULT_SERVER),
         weread_app_curl=_env("WEREAD_APP_CURL"),
         exchange_award=_env("EXCHANGE_AWARD", DEFAULT_EXCHANGE_AWARD),

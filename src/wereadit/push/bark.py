@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class BarkPusher(Pusher):
     """Bark 推送。
 
-    device_key 由 cfg.bark_key 提供（环境变量 BARK），
+    device key 由 cfg.bark_key 提供（环境变量 BARK_PUSHER），
     服务器地址由 cfg.bark_server 提供（环境变量 BARK_SERVER，默认官方）。
     """
 

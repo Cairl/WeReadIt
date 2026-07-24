@@ -40,7 +40,7 @@
 | `TELEGRAM_BOT_TOKEN` | Secret | 选填 | -      | Telegram Bot token（需同时配置 CHAT_ID） |
 | `TELEGRAM_CHAT_ID`   | Secret | 选填 | -      | Telegram 会话 ID（需同时配置 BOT_TOKEN） |
 | `SERVERCHAN`         | Secret | 选填 | -      | ServerChan 推送 token                   |
-| `BARK`               | Secret | 选填 | -      | Bark 推送 device key                     |
+| `BARK_PUSHER`        | Secret | 选填 | -      | Bark 推送 device key（或完整 URL）       |
 | `BARK_SERVER`        | Variable | 选填 | `https://api.day.app` | Bark 服务器地址（自建时填写） |
 
 ## 配置（三步走）
