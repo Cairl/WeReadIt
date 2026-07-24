@@ -94,37 +94,16 @@ class TestPushFunction:
         assert "成功" in body["title"]
 
     def test_push_bark_success(self, mock_client: MagicMock) -> None:
-        """bark 推送应 POST 到 {server}/{device_key}，body 含 title/body。"""
-        cfg = _make_cfg(bark_key="device_key_123")
+        """bark 推送应 POST 到 BARK_PUSHER 指定的完整 URL，body 含 title/body。"""
+        cfg = _make_cfg(bark_key="https://api.day.app/device_key_123")
         result = push("hello", "bark", mock_client, cfg)
         assert result is True
         mock_client.post.assert_called_once()
         args, kwargs = mock_client.post.call_args
-        assert "api.day.app/device_key_123" in args[0]
+        assert args[0] == "https://api.day.app/device_key_123"
         body = kwargs["json"]
         assert "成功" in body["title"]
         assert body["body"] == "hello"
-
-    def test_push_bark_custom_server(self, mock_client: MagicMock) -> None:
-        """BARK_SERVER 自建服务器应覆盖默认地址。"""
-        from wereadit.constants import BARK_DEFAULT_SERVER
-        cfg = _make_cfg(bark_key="key", bark_server="https://bark.example.com")
-        result = push("hi", "bark", mock_client, cfg)
-        assert result is True
-        args, _ = mock_client.post.call_args
-        assert "bark.example.com/key" in args[0]
-        assert BARK_DEFAULT_SERVER == "https://api.day.app"
-
-    def test_push_bark_full_url(self, mock_client: MagicMock) -> None:
-        """token 是完整 URL 时直接用，忽略 bark_server。"""
-        cfg = _make_cfg(
-            bark_key="https://api.day.app/aZybLbnT5XhyUhkPxLBQGn",
-            bark_server="https://bark.example.com",
-        )
-        result = push("hi", "bark", mock_client, cfg)
-        assert result is True
-        args, _ = mock_client.post.call_args
-        assert args[0] == "https://api.day.app/aZybLbnT5XhyUhkPxLBQGn"
 
     def test_push_bark_full_url_trailing_slash(self, mock_client: MagicMock) -> None:
         """完整 URL 末尾带斜杠时应去除。"""

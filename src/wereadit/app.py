@@ -135,7 +135,7 @@ def main() -> int:
                 logger.error("兑换奖励异常: %s", exc)
                 exchange_summary = f"兑换奖励失败: {exc}"
         else:
-            logger.info("无可用兑换 Token（WEREAD_APP_CURL 未配置或刷新失败），跳过兑换。")
+            logger.info("无可用兑换 Token（WEREAD_APP_CURL 未配置或刷新失败），跳过兑换")
             if refresh_diagnosis:
                 # 配了 APP_CURL 但刷新失败：兑换目标未达成，标记为可见失败
                 exit_code = 1
@@ -153,7 +153,7 @@ def main() -> int:
             logger.info("开始推送...")
             push(push_content, push_method, client, cfg, is_success=not has_failure)
         else:
-            logger.info("未配置推送渠道，跳过推送。")
+            logger.info("未配置推送渠道，跳过推送")
 
     except CookieExpiredError as exc:
         logger.error("Cookie 刷新失败：%s", exc)

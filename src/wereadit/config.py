@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any
 
 from wereadit.constants import (
-    BARK_DEFAULT_SERVER,
     DEFAULT_COOKIES,
     DEFAULT_EXCHANGE_AWARD,
     DEFAULT_HEADERS,
@@ -87,7 +86,6 @@ class Config:
     telegram_chat_id: str = ""
     serverchan_spt: str = ""
     bark_key: str = ""
-    bark_server: str = BARK_DEFAULT_SERVER
 
     # 兑换参数
     exchange_award: str = DEFAULT_EXCHANGE_AWARD
@@ -181,7 +179,6 @@ def load_config() -> Config:
         telegram_chat_id=_env("TELEGRAM_CHAT_ID"),
         serverchan_spt=_env_renamed("SERVERCHAN", "SERVERCHAN_SPT"),
         bark_key=_env("BARK_PUSHER"),
-        bark_server=_env("BARK_SERVER", BARK_DEFAULT_SERVER),
         weread_app_curl=_env("WEREAD_APP_CURL"),
         exchange_award=_env("EXCHANGE_AWARD", DEFAULT_EXCHANGE_AWARD),
         headers=headers,

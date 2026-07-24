@@ -337,7 +337,7 @@ def read_books(client: HttpClient, cfg: Config) -> ReadResult:
         )
         time.sleep(CIRCUIT_BREAKER_BACKOFF)
 
-    logger.info("阅读脚本已完成")
+    logger.info("完成阅读目标")
     return ReadResult(
         completed_count=index - 1,
         total_minutes=(index - 1) * 0.5,

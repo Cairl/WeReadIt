@@ -1,9 +1,8 @@
 """Bark 推送渠道。
 
 Bark 是 iOS 上的推送 App，通过简单的 HTTP 接口接收通知。
-- 官方服务器：https://api.day.app
-- 自建服务器：通过 BARK_SERVER 环境变量配置
-- 推送方式：POST JSON 到 {server}/{device_key}，body 含 title/body
+- 配置方式：环境变量 BARK_PUSHER 填完整 URL（如 https://api.day.app/<device_key>）
+- 推送方式：POST JSON 到 BARK_PUSHER 指定的 URL，body 含 title/body
 """
 
 from __future__ import annotations
@@ -21,20 +20,13 @@ logger = logging.getLogger(__name__)
 class BarkPusher(Pusher):
     """Bark 推送。
 
-    device key 由 cfg.bark_key 提供（环境变量 BARK_PUSHER），
-    服务器地址由 cfg.bark_server 提供（环境变量 BARK_SERVER，默认官方）。
+    BARK_PUSHER 环境变量填完整 URL（如 https://api.day.app/<device_key>），
+    末尾斜杠可选。不再支持 server+key 分离配置。
     """
 
     @with_retry()
     def send(self, content: str, is_success: bool = True) -> bool:
-        # token 既可以是纯 device_key（配合 bark_server 拼接），
-        # 也可以是完整 URL（https://api.day.app/<key>[/]），自动识别
-        token = (self.token or "").strip()
-        if token.startswith(("http://", "https://")):
-            url = token.rstrip("/")
-        else:
-            server = self.cfg.bark_server.rstrip("/")
-            url = f"{server}/{token.strip('/')}"
+        url = (self.token or "").strip().rstrip("/")
         title = f"WeReadIt-{'成功' if is_success else '失败'}"
         response = self.client.post(
             url,

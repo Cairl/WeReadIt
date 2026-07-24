@@ -88,7 +88,7 @@ def push(
         是否发送成功
     """
     if not method:
-        logger.warning("未配置推送渠道，跳过推送。")
+        logger.warning("未配置推送渠道，跳过推送")
         return False
     pusher = get_pusher(method, client, cfg)
     if pusher is None:

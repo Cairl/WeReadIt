@@ -50,6 +50,7 @@ jobs:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         SERVERCHAN: ${{ secrets.SERVERCHAN }}
+        BARK_PUSHER: ${{ secrets.BARK_PUSHER }}
         READ_NUM: ${{ vars.READ_NUM }}
         EXCHANGE_AWARD: ${{ vars.EXCHANGE_AWARD }}
 
