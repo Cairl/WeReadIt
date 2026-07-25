@@ -106,7 +106,7 @@ class TestExchangeAwards:
     def test_missing_vid_returns_error(self, mock_client: MagicMock) -> None:
         cfg = _make_cfg(cookies={})
         result = exchange_awards(mock_client, cfg)
-        assert "未找到 wr_vid" in result
+        assert "未找到 wr_vid" in result.error
 
     def test_successful_exchange(self, mock_client: MagicMock) -> None:
         """2 个可领 + 全兑书币：应兑换 2 个，跳过 1 个已领。"""
@@ -120,9 +120,10 @@ class TestExchangeAwards:
         mock_client.post.return_value = mock_response
 
         result = exchange_awards(mock_client, cfg)
-        assert "兑换: 2 书币" in result
-        assert "跳过: 1" in result
-        assert "失败: 0" in result
+        assert result.exchanged_coin == 2
+        assert result.skipped == 1
+        assert result.failed == 0
+        assert result.error == ""
         # 1 次查询 + 2 次兑换 = 3 次 post
         assert mock_client.post.call_count == 3
 
@@ -136,8 +137,8 @@ class TestExchangeAwards:
         mock_client.post.return_value = mock_response
 
         result = exchange_awards(mock_client, cfg)
-        assert "兑换: 0 书币" in result
-        assert "跳过: 3" in result  # 2 个策略跳过 + 1 个已领取
+        assert result.exchanged_coin == 0
+        assert result.skipped == 3  # 2 个策略跳过 + 1 个已领取
         # 只查询，不兑换
         assert mock_client.post.call_count == 1
 
@@ -156,8 +157,10 @@ class TestExchangeAwards:
             exchange_awards(mock_client, cfg)
         assert exc_info.value.errcode == ERRCODE_TOKEN_EXPIRED
 
-    def test_query_other_exchange_error_returns_string(self, mock_client: MagicMock) -> None:
-        """查询抛非 Token 过期的 ExchangeError 时返回错误字符串，不 re-raise。"""
+    def test_query_other_exchange_error_returns_result_with_error(
+        self, mock_client: MagicMock
+    ) -> None:
+        """查询抛非 Token 过期的 ExchangeError 时返回带 error 的 ExchangeResult，不 re-raise。"""
         cfg = _make_cfg()
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -168,8 +171,8 @@ class TestExchangeAwards:
         mock_client.post.return_value = mock_response
 
         result = exchange_awards(mock_client, cfg)
-        assert "兑换奖励失败" in result
-        assert "-999" in result
+        assert result.error
+        assert "-999" in result.error
 
     def test_ios_platform(self, mock_client: MagicMock) -> None:
         """iOS 平台应使用 skey header。"""
@@ -182,11 +185,39 @@ class TestExchangeAwards:
         mock_client.post.return_value = mock_response
 
         result = exchange_awards(mock_client, cfg)
-        assert "iOS" in result
+        assert result.platform == "iOS"
         # 检查 post 调用的 headers 参数
         _, kwargs = mock_client.post.call_args
         assert "skey" in kwargs["headers"]
         assert "accessToken" not in kwargs["headers"]
+
+    def test_keep_reading_days_and_coin_balance_extracted(self, mock_client: MagicMock) -> None:
+        """响应中的连续阅读天数与书币余额应被提取到 ExchangeResult。"""
+        cfg = _make_cfg()
+        query_resp = _mock_award_data()
+        query_resp["keepReadingDays"] = 128
+        query_resp["bookCoin"] = 9.92
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = query_resp
+        mock_client.post.return_value = mock_response
+
+        result = exchange_awards(mock_client, cfg)
+        assert result.keep_reading_days == 128
+        assert result.coin_balance == 9.92
+
+    def test_optional_fields_none_when_absent(self, mock_client: MagicMock) -> None:
+        """响应中无连续阅读/书币字段时，对应字段为 None。"""
+        cfg = _make_cfg()
+        query_resp = _mock_award_data()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = query_resp
+        mock_client.post.return_value = mock_response
+
+        result = exchange_awards(mock_client, cfg)
+        assert result.keep_reading_days is None
+        assert result.coin_balance is None
 
 
 class TestExchangeTokenRefresh:
@@ -267,7 +298,7 @@ class TestExchangeTokenRefresh:
             cfg,
             token_refreshed_at=time.time() - 6000,
         )
-        assert "兑换奖励失败" not in result
+        assert result.error == ""
 
 
 class TestExchangeLogging:
@@ -322,8 +353,8 @@ class TestExchangeLogging:
         with caplog.at_level(logging.WARNING, logger="wereadit.core.exchanger"):
             result = exchange_awards(mock_client, cfg)
 
-        # 非 token 过期错误应返回字符串而非 raise
-        assert "兑换奖励失败" in result
+        # 非 token 过期错误应返回带 error 的 ExchangeResult 而非 raise
+        assert result.error
         # 验证 WARNING 日志中包含 HTTP 状态码、errcode、errmsg
         warning_text = caplog.text
         assert "403" in warning_text

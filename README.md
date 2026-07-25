@@ -42,7 +42,7 @@
 | `SERVERCHAN`         | Secret | 选填 | -      | ServerChan 推送 token                   |
 | `BARK_PUSHER`        | Secret | 选填 | -      | Bark 推送完整 URL（如 https://api.day.app/<key>） |
 
-## 配置（三步走）
+## 配置
 
 ### 第 1 步：配置 WEREAD_WEB_CURL（阅读必需）
 
@@ -56,51 +56,19 @@
 ### 第 2 步：配置 WEREAD_APP_CURL（兑换必需）
 
 1. 杀掉微信读书 App 重新打开（冷启动会触发 /login 刷新请求）。
-2. 用抓包工具捕获 `i.weread.qq.com/login` 请求，确认请求 body 中含 `deviceId`（长效设备凭证，缺了它重放必然失败）。
-3. 将该请求复制为 cURL (Bash) 格式。
+2. 用抓包工具捕获 `i.weread.qq.com/login` 请求，确认请求 body 中含 `deviceId`。
+3. 将该请求复制为 cURL 格式。
 4. 配置到 Secret `WEREAD_APP_CURL`。
 
 > 脚本每次运行会在阅读开始前自动重放 `/login` 刷新兑换 Token，平台（iOS/Android）从响应字段自动识别，无需任何其他配置。抓一次长期有效（不换设备、不重新登录即可）。
 
-### 第 3 步：验证配置（配置检查按钮）
+### 第 3 步：验证配置（配置检查）
 
 GitHub 仓库页 → 顶栏 `Actions` → 左侧选 **WeReadIt 配置检查** → 右侧 **Run workflow** → 几分钟后推送收到检查报告。全部 `[正常]` 即托管就绪；有 `[异常]` 则按报告内指引修正后重新检查。
 
-### 迁移说明（2026-07-22 之前的老用户）
-
-Secret 已改名并精简：
-
-1. `WEREAD_CURL_BASH` → 改名 `WEREAD_WEB_CURL`（值不变，删旧建新）。
-2. `WEREAD_LOGIN_CURL` → 改名 `WEREAD_APP_CURL`（值不变，删旧建新）。
-3. `WEREAD_ANDROID_TOKEN` / `WEREAD_IOS_TOKEN` → 直接删除（兑换 Token 现已完全由 `WEREAD_APP_CURL` 自动生成）。
-
-改完后点一次「配置检查」验证（见第 3 步）。
-
-> 注意：改名完成前，兑换将静默跳过（阅读不受影响），以配置检查报告为准。
-
-> 兜底思路（本项目未实现）：若 `/login` 重放被服务端彻底关闭，社区方案是手机端用 Quantumult X / 快捷指令定时拦截 App 的 skey 并调用 GitHub API 更新 Secrets。依赖手机常开与抓包 App，仅作为最后手段记录在案。
-
-## 本地运行
-
-```bash
-git clone <repository>
-cd WeReadIt
-
-pip install -r requirements.txt
-
-export WEREAD_WEB_CURL='curl ...'
-
-# 可选
-export PUSHPLUS=xxxx
-
-python main.py
-```
-
-或直接修改 `src/wereadit/constants.py` 中的默认请求头和 Cookie 进行本地调试。
-
 ## 致谢
 
-项目灵感及部分代码实现参考自 [findmover/wxread](https://github.com/findmover/wxread)，由衷感谢原作者技术支持。
+项目部分灵感及代码的实现参考自 [findmover/wxread](https://github.com/findmover/wxread)，感谢原作者技术支持。
 
 ## 免责声明
 

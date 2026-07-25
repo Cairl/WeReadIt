@@ -7,7 +7,7 @@
 - 重试改为指数退避
 
 业务逻辑保持不变：
-- 查询所有奖励 -> 过滤可领取 -> 按策略逐个兑换 -> 返回摘要
+- 查询所有奖励 -> 过滤可领取 -> 按策略逐个兑换 -> 返回 ExchangeResult
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -50,6 +51,43 @@ from wereadit.infra.http import HttpClient
 from wereadit.models import Award, AwardChoice
 
 logger = logging.getLogger(__name__)
+
+# 响应中可能表示"连续阅读天数"的字段名（按优先级尝试，取首个非空值）
+_KEEP_READING_KEYS = (
+    "keepReadingDays",
+    "continuousReadDays",
+    "totalReadDay",
+    "totalReadDays",
+)
+# 响应中可能表示"书币钱包余额"的字段名（按优先级尝试）
+_COIN_BALANCE_KEYS = (
+    "bookCoin",
+    "bookCoinBalance",
+    "walletCoin",
+    "userCoin",
+    "coin",
+)
+
+
+@dataclass
+class ExchangeResult:
+    """兑换结果（结构化）。
+
+    成功时 error 为空；失败时 error 非空，其余字段为零值。
+    可选字段（keep_reading_days / coin_balance）由响应决定是否有值，
+    无值时为 None，formatter 会自动跳过对应行。
+    """
+
+    reading_time: int = 0  # 本周阅读时长（秒）
+    reading_day: int = 0  # 本周阅读天数
+    exchanged_coin: int = 0  # 兑换的书币数
+    exchanged_card: int = 0  # 兑换的体验卡天数
+    skipped: int = 0  # 跳过的奖励数
+    failed: int = 0  # 兑换失败的奖励数
+    platform: str = ""  # 平台标识（iOS / Android）
+    keep_reading_days: int | None = None  # 连续阅读天数（可选）
+    coin_balance: float | None = None  # 书币钱包余额（可选）
+    error: str = ""  # 兑换错误描述（非空表示兑换失败）
 
 
 def _build_headers(auth_token: str, vid: str, platform: str) -> dict[str, str]:
@@ -141,13 +179,34 @@ def _parse_strategy(strategy_str: str) -> dict[int, int]:
     return {AWARD_LEVEL_IDS[i]: parts[i] for i in range(len(AWARD_LEVEL_IDS))}
 
 
+def _extract_keep_reading_days(award_data: dict[str, Any]) -> int | None:
+    """从容错字段名列表中提取连续阅读天数，未找到返回 None。"""
+    for key in _KEEP_READING_KEYS:
+        value = award_data.get(key)
+        if isinstance(value, int | float) and value > 0:
+            return int(value)
+    return None
+
+
+def _extract_coin_balance(award_data: dict[str, Any]) -> float | None:
+    """从容错字段名列表中提取书币钱包余额，未找到返回 None。
+
+    微信读书书币余额可能以整数（书币数）或小数（元）形式返回，统一转 float。
+    """
+    for key in _COIN_BALANCE_KEYS:
+        value = award_data.get(key)
+        if isinstance(value, int | float) and value > 0:
+            return float(value)
+    return None
+
+
 def exchange_awards(
     client: HttpClient,
     cfg: Config,
     *,
     refresher: Callable[[], RefreshResult] | None = None,
     token_refreshed_at: float | None = None,
-) -> str:
+) -> ExchangeResult:
     """查询并兑换阅读奖励。
 
     Args:
@@ -158,13 +217,16 @@ def exchange_awards(
             配合；兑换前 token 年龄超过 TOKEN_MAX_AGE_SECONDS 时调 refresher 补刷
 
     Returns:
-        兑换结果摘要字符串（用于推送）
+        ExchangeResult：结构化兑换结果，成功时 error 为空，失败时 error 非空。
+
+    Raises:
+        ExchangeError: Token 过期（errcode==-2012），由调用方处理告警。
     """
     auth_token = cfg.weread_access_token
     vid = cfg.cookies.get("wr_vid", "")
     if not vid:
         logger.warning("cookie 中未找到 wr_vid，跳过兑换")
-        return "兑换奖励失败: cookie 中未找到 wr_vid"
+        return ExchangeResult(error="cookie 中未找到 wr_vid")
 
     # 补刷保险：阅读耗时过长导致 token 年龄接近 2 小时有效期时，兑换前再刷一次
     if (
@@ -196,7 +258,8 @@ def exchange_awards(
         "awardChoiceType": 0,
     }
     # 查询失败不重试（与兑换循环不同）：Token 过期 re-raise 由 app.py 处理，
-    # 其他 ExchangeError 转字符串返回；网络异常等非 ExchangeError 直接抛出由上层兜底。
+    # 其他 ExchangeError 转 ExchangeResult.error 返回；网络异常等非 ExchangeError
+    # 直接抛出由上层兜底。
     try:
         award_data = _call_exchange(client, auth_token, vid, cfg.weread_platform, query_body)
     except ExchangeError as exc:
@@ -207,10 +270,12 @@ def exchange_awards(
             )
             raise
         logger.error("查询奖励失败: %s", exc)
-        return f"兑换奖励失败: {exc}"
+        return ExchangeResult(error=str(exc))
 
     reading_time = award_data.get("readingTime", 0)
     reading_day = award_data.get("readingDay", 0)
+    keep_reading_days = _extract_keep_reading_days(award_data)
+    coin_balance = _extract_coin_balance(award_data)
     raw_awards = award_data.get("readtimeAwards", []) + award_data.get("readdayAwards", [])
     awards = [Award.from_dict(a) for a in raw_awards]
 
@@ -303,10 +368,14 @@ def exchange_awards(
             logger.error("兑换 %s 失败（重试 %d 次）", award.award_level_desc, EXCHANGE_MAX_RETRY)
             failed += 1
 
-    summary = (
-        f"阅读奖励兑换完成 ({platform_name})\n"
-        f"本周阅读: {reading_day} 天 / {reading_time / 3600:.1f} 小时\n"
-        f"兑换: {exchanged_coin} 书币, {exchanged_card} 天体验卡\n"
-        f"跳过: {skipped}, 失败: {failed}"
+    return ExchangeResult(
+        reading_time=reading_time,
+        reading_day=reading_day,
+        exchanged_coin=exchanged_coin,
+        exchanged_card=exchanged_card,
+        skipped=skipped,
+        failed=failed,
+        platform=platform_name,
+        keep_reading_days=keep_reading_days,
+        coin_balance=coin_balance,
     )
-    return summary

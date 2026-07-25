@@ -20,6 +20,7 @@ from wereadit.constants import ERRCODE_TOKEN_EXPIRED, PLATFORM_IOS
 from wereadit.exceptions import CookieExpiredError, ExchangeError, ReadFailedError
 from wereadit.infra.http import HttpClient
 from wereadit.push import push
+from wereadit.push.formatter import PushMessage, format_push_message
 
 if TYPE_CHECKING:
     from wereadit.core.token_refresher import RefreshResult
@@ -47,9 +48,13 @@ def main() -> int:
     client = HttpClient(headers=cfg.headers, cookies=cfg.cookies)
 
     push_method = cfg.push_method
-    exchange_summary = ""
     exit_code = 0
     has_failure = False  # 推送状态标志：兑换失败但阅读成功时为 False；Token 过期等致命错误为 True
+
+    # 推送消息组装：所有分支共用一个 PushMessage，最后统一渲染
+    msg = PushMessage(
+        account=cfg.cookies.get("wr_vid", ""),
+    )
 
     try:
         # 兑换 Token：阅读前由 /login 重放刷新生成，平台从命中字段名自识别
@@ -89,11 +94,8 @@ def main() -> int:
         from wereadit.core.reader import read_books
 
         result = read_books(client, cfg)
-        push_content = (
-            f"WeReadIt 自动阅读完成。\n"
-            f"阅读时长：{result.total_minutes} 分钟。\n"
-            f"{result.summary()}"
-        )
+        msg.read_minutes = result.total_minutes
+        msg.metrics_summary = result.summary()
 
         # 兑换阅读奖励
         if cfg.weread_access_token:
@@ -101,12 +103,20 @@ def main() -> int:
             try:
                 from wereadit.core.exchanger import exchange_awards
 
-                exchange_summary = exchange_awards(
+                exchange_result = exchange_awards(
                     client,
                     cfg,
                     refresher=refresher,
                     token_refreshed_at=token_refreshed_at,
                 )
+                msg.weekly_read_seconds = exchange_result.reading_time
+                msg.exchanged_coin = exchange_result.exchanged_coin
+                msg.exchanged_card = exchange_result.exchanged_card
+                msg.keep_reading_days = exchange_result.keep_reading_days
+                msg.coin_balance = exchange_result.coin_balance
+                if exchange_result.error:
+                    msg.exchange_error = exchange_result.error
+                    msg.is_partial = True
             except ExchangeError as exc:
                 if exc.errcode == ERRCODE_TOKEN_EXPIRED:
                     # 排查 token 过快过期：告警中明确平台 + token 前 8 位，
@@ -122,55 +132,61 @@ def main() -> int:
                         guidance = "请重新抓包更新 WEREAD_APP_CURL（杀 App 冷启动抓 /login，body 须含 deviceId）。"
                     else:
                         guidance = "未配置 WEREAD_APP_CURL 自动续期，请按 README 配置。"
-                    exchange_summary = (
-                        f"兑换奖励失败: {platform_label} Token 已过期。{guidance}\n"
-                        f"过期 Token 前 8 位: {token_preview}..."
+                    msg.exchange_error = (
+                        f"{platform_label} Token 已过期。{guidance}"
+                        f"（过期 Token 前 8 位: {token_preview}...）"
                     )
                     exit_code = 1
                     has_failure = True
+                    msg.is_partial = True
                 else:
                     logger.error("兑换奖励异常: %s", exc)
-                    exchange_summary = f"兑换奖励失败: {exc}"
+                    msg.exchange_error = str(exc)
+                    msg.is_partial = True
             except Exception as exc:  # noqa: BLE001
                 logger.error("兑换奖励异常: %s", exc)
-                exchange_summary = f"兑换奖励失败: {exc}"
+                msg.exchange_error = str(exc)
+                msg.is_partial = True
         else:
             logger.info("无可用兑换 Token（WEREAD_APP_CURL 未配置或刷新失败），跳过兑换")
+            msg.exchange_skipped = True
             if refresh_diagnosis:
                 # 配了 APP_CURL 但刷新失败：兑换目标未达成，标记为可见失败
                 exit_code = 1
                 has_failure = True
+                msg.is_partial = True
 
-        if exchange_summary:
-            push_content += f"\n\n{exchange_summary}"
-        if refresh_diagnosis:
-            push_content += f"\n\nToken 自动续期诊断：{refresh_diagnosis}"
-        if platform_note:
-            push_content += f"\n\n{platform_note}"
+        msg.refresh_diagnosis = refresh_diagnosis
+        msg.platform_note = platform_note
+        msg.is_success = not has_failure
 
         # 推送成功通知
         if push_method:
             logger.info("开始推送...")
+            push_content = format_push_message(msg)
             push(push_content, push_method, client, cfg, is_success=not has_failure)
         else:
             logger.info("未配置推送渠道，跳过推送")
 
     except CookieExpiredError as exc:
         logger.error("Cookie 刷新失败：%s", exc)
+        msg.fatal_error = f"Cookie 刷新失败：{exc}"
         if push_method:
-            push(str(exc), push_method, client, cfg, is_success=False)
+            push(format_push_message(msg), push_method, client, cfg, is_success=False)
         exit_code = 1
 
     except ReadFailedError as exc:
         logger.error("阅读熔断：%s", exc)
+        msg.fatal_error = f"阅读熔断：{exc}"
         if push_method:
-            push(f"WeReadIt 阅读熔断：{exc}", push_method, client, cfg, is_success=False)
+            push(format_push_message(msg), push_method, client, cfg, is_success=False)
         exit_code = 1
 
     except Exception as exc:  # noqa: BLE001
         logger.error("未捕获异常：%s\n%s", exc, traceback.format_exc())
+        msg.fatal_error = f"运行失败：{exc}"
         if push_method:
-            push(f"WeReadIt 运行失败：{exc}", push_method, client, cfg, is_success=False)
+            push(format_push_message(msg), push_method, client, cfg, is_success=False)
         exit_code = 1
 
     finally:

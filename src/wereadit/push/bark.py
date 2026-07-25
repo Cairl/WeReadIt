@@ -35,5 +35,5 @@ class BarkPusher(Pusher):
             timeout=PUSH_TIMEOUT,
         )
         response.raise_for_status()
-        logger.info("Bark 响应: %s", response.text)
+        logger.info("推送完成")
         return True

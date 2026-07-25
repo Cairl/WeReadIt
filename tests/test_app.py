@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 from wereadit.app import main
 from wereadit.config import Config
 from wereadit.constants import ERRCODE_TOKEN_EXPIRED, PLATFORM_IOS
+from wereadit.core.exchanger import ExchangeResult
 from wereadit.exceptions import ExchangeError
 
 
@@ -48,6 +49,19 @@ def _mock_read_result() -> MagicMock:
     result.total_minutes = 30
     result.summary.return_value = "阅读统计: 30 分钟"
     return result
+
+
+def _mock_exchange_result() -> ExchangeResult:
+    """构造 mock ExchangeResult，供 exchange_awards 返回。"""
+    return ExchangeResult(
+        reading_time=3600,
+        reading_day=5,
+        exchanged_coin=2,
+        exchanged_card=0,
+        skipped=1,
+        failed=0,
+        platform="Android",
+    )
 
 
 class TestMainExchangeErrorHandling:
@@ -138,7 +152,7 @@ class TestMainTokenRefresh:
             ),
             patch(
                 "wereadit.core.exchanger.exchange_awards",
-                return_value="兑换完成",
+                return_value=_mock_exchange_result(),
             ) as mock_exchange,
             patch("wereadit.app.push") as mock_push,
             patch(
@@ -172,7 +186,7 @@ class TestMainTokenRefresh:
             patch("wereadit.core.reader.read_books", return_value=_mock_read_result()),
             patch(
                 "wereadit.core.exchanger.exchange_awards",
-                return_value="兑换完成",
+                return_value=_mock_exchange_result(),
             ) as mock_exchange,
             patch("wereadit.app.push") as mock_push,
             patch(
