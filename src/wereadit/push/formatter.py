@@ -12,7 +12,7 @@
     账号：xxxx
 
     阅读状态：成功
-    本轮阅读：60 分钟
+    本轮阅读：1 小时
     本周阅读：7 小时 31 分钟
     连续阅读：128 天
 
@@ -107,7 +107,7 @@ def format_push_message(msg: PushMessage) -> str:
     lines.append("")
     if msg.reading_success:
         lines.append("阅读状态：成功")
-        lines.append(f"本轮阅读：{msg.read_minutes:.0f} 分钟")
+        lines.append(f"本轮阅读：{_format_duration(int(msg.read_minutes * 60))}")
         if msg.weekly_read_seconds > 0:
             lines.append(f"本周阅读：{_format_duration(msg.weekly_read_seconds)}")
         if msg.keep_reading_days is not None:
@@ -131,16 +131,17 @@ def format_push_message(msg: PushMessage) -> str:
         # 阅读失败导致兑换未进行
         lines.append("兑换状态：失败")
         if msg.reading_error:
-            lines.append(f"阅读未完成，兑换未进行")
+            lines.append("阅读未完成，兑换未进行")
         else:
             lines.append("兑换未进行")
     elif msg.exchange_success:
         lines.append("兑换状态：成功")
-        if msg.coin_balance is not None:
-            balance_str = f"{msg.coin_balance:.2f}"
-            if msg.exchanged_coin > 0:
-                balance_str += f" (+{msg.exchanged_coin})"
-            lines.append(f"赠币：{balance_str}")
+        # 赠币行：兑换成功时始终展示当前书币余额
+        balance = msg.coin_balance if msg.coin_balance is not None else 0.0
+        balance_str = f"{balance:.2f}"
+        if msg.exchanged_coin > 0:
+            balance_str += f" (+{msg.exchanged_coin})"
+        lines.append(f"赠币：{balance_str}")
         lines.append(f"体验卡：{msg.exchanged_card} 天")
     elif msg.exchange_skipped and not msg.exchange_error:
         lines.append("兑换状态：未配置")

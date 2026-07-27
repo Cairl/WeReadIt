@@ -192,10 +192,11 @@ def _extract_coin_balance(award_data: dict[str, Any]) -> float | None:
     """从容错字段名列表中提取书币钱包余额，未找到返回 None。
 
     微信读书书币余额可能以整数（书币数）或小数（元）形式返回，统一转 float。
+    余额为 0 时也返回 0.0（而非 None），确保推送时能展示当前书币。
     """
     for key in _COIN_BALANCE_KEYS:
         value = award_data.get(key)
-        if isinstance(value, int | float) and value > 0:
+        if isinstance(value, int | float) and value >= 0:
             return float(value)
     return None
 

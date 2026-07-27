@@ -206,6 +206,19 @@ class TestExchangeAwards:
         assert result.keep_reading_days == 128
         assert result.coin_balance == 9.92
 
+    def test_coin_balance_zero_extracted(self, mock_client: MagicMock) -> None:
+        """书币余额为 0 时应返回 0.0（而非 None），确保推送能展示当前书币。"""
+        cfg = _make_cfg()
+        query_resp = _mock_award_data()
+        query_resp["bookCoin"] = 0
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = query_resp
+        mock_client.post.return_value = mock_response
+
+        result = exchange_awards(mock_client, cfg)
+        assert result.coin_balance == 0.0
+
     def test_optional_fields_none_when_absent(self, mock_client: MagicMock) -> None:
         """响应中无连续阅读/书币字段时，对应字段为 None。"""
         cfg = _make_cfg()

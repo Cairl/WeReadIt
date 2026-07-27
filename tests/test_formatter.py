@@ -36,7 +36,7 @@ class TestFormatSuccess:
         # 平台信息在账号之后、阅读状态之前
         assert "账号：12345\n平台：iOS" in text
         assert "阅读状态：成功" in text
-        assert "本轮阅读：60 分钟" in text
+        assert "本轮阅读：1 小时" in text
         assert "本周阅读：7 小时 31 分钟" in text
         assert "连续阅读：128 天" in text
         assert "兑换状态：成功" in text
@@ -64,6 +64,8 @@ class TestFormatSuccess:
         assert "本轮阅读：30 分钟" in text
         assert "本周阅读：1 小时" in text
         assert "兑换状态：成功" in text
+        # coin_balance 未设置时默认 0.00，仍有本次兑换数
+        assert "赠币：0.00 (+1)" in text
         assert "体验卡：0 天" in text
         assert "连续阅读" not in text
 
@@ -78,7 +80,7 @@ class TestFormatSuccess:
         text = format_push_message(msg)
 
         assert "阅读状态：成功" in text
-        assert "本轮阅读：60 分钟" in text
+        assert "本轮阅读：1 小时" in text
         assert "兑换状态：未配置" in text
         assert "本周阅读" not in text
 
@@ -118,7 +120,7 @@ class TestFormatPartial:
         text = format_push_message(msg)
 
         assert "阅读状态：成功" in text
-        assert "本轮阅读：60 分钟" in text
+        assert "本轮阅读：1 小时" in text
         assert "兑换状态：失败" in text
         assert "cookie 中未找到 wr_vid" in text
 
