@@ -1,7 +1,7 @@
 """app.main() 测试：验证兑换异常分支的 exit_code 与 push is_success 一致性。
 
-覆盖 2026-07-21 引入的 has_failure 标志逻辑：
-- Token 过期 (errcode==-2012) → exit_code=1, push is_success=False
+覆盖 has_failure 标志逻辑重构为 reading_success/exchange_success 后的行为：
+- Token 过期 (errcode==-2012) → exit_code=1, push is_success=True（阅读成功，兑换失败由正文体现）
 - 其他兑换错误 → exit_code=0, push is_success=True（阅读仍成功）
 - 未配置 weread_access_token → 跳过兑换, exit_code=0, is_success=True
 """
@@ -67,8 +67,8 @@ def _mock_exchange_result() -> ExchangeResult:
 class TestMainExchangeErrorHandling:
     """验证 main() 对兑换异常的处理与 push 状态一致性。"""
 
-    def test_token_expired_returns_1_and_push_failure(self) -> None:
-        """Token 过期: exit_code=1, push is_success=False（告警不被掩盖）。"""
+    def test_token_expired_returns_1_and_push_success(self) -> None:
+        """Token 过期: exit_code=1, push is_success=True（阅读成功，兑换失败由正文体现）。"""
         cfg = _make_cfg()
         with (
             patch("wereadit.app.load_config", return_value=cfg),
@@ -84,7 +84,7 @@ class TestMainExchangeErrorHandling:
 
         assert exit_code == 1
         mock_push.assert_called_once()
-        assert mock_push.call_args.kwargs["is_success"] is False
+        assert mock_push.call_args.kwargs["is_success"] is True
 
     def test_exchange_other_error_returns_0_and_push_success(self) -> None:
         """其他兑换错误: exit_code=0, push is_success=True（阅读仍成功）。"""
@@ -200,7 +200,7 @@ class TestMainTokenRefresh:
         assert used_cfg.app_token_key == "skey"
         assert used_cfg.weread_platform == PLATFORM_IOS
         push_content = mock_push.call_args.args[0]
-        assert "平台自识别：iOS" in push_content
+        assert "平台：iOS" in push_content
 
     def test_exchange_receives_refresher_args(self) -> None:
         """exchange_awards 收到 refresher 回调与刷新时刻。"""
@@ -212,7 +212,7 @@ class TestMainTokenRefresh:
         assert isinstance(kwargs["token_refreshed_at"], float)
 
     def test_refresh_skipped_when_curl_unhealthy(self) -> None:
-        """体检不过：不发起刷新，诊断进推送，exit_code=1。"""
+        """体检不过：不发起刷新，诊断进推送，exit_code=1。阅读仍成功，push is_success=True。"""
         cfg = _make_cfg(
             app_token="",
             app_token_key="",
@@ -224,10 +224,10 @@ class TestMainTokenRefresh:
         mock_refresh.assert_not_called()
         push_content = mock_push.call_args.args[0]
         assert "不是 /login" in push_content
-        assert mock_push.call_args.kwargs["is_success"] is False
+        assert mock_push.call_args.kwargs["is_success"] is True
 
     def test_refresh_failure_no_token_exit_1(self) -> None:
-        """刷新失败且无 token：跳过兑换，诊断进推送，exit_code=1。"""
+        """刷新失败且无 token：跳过兑换，诊断进推送，exit_code=1。阅读仍成功，push is_success=True。"""
         from wereadit.core.token_refresher import RefreshResult
 
         cfg = _make_cfg(app_token="", app_token_key="", weread_app_curl=self._APP_CURL)
@@ -248,7 +248,7 @@ class TestMainTokenRefresh:
         mock_exchange.assert_not_called()
         push_content = mock_push.call_args.args[0]
         assert "网络异常" in push_content
-        assert mock_push.call_args.kwargs["is_success"] is False
+        assert mock_push.call_args.kwargs["is_success"] is True
 
     def test_no_app_curl_no_refresh(self) -> None:
         """未配置 APP_CURL：刷新段整体跳过，行为与旧版一致。"""

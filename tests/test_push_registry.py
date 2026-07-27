@@ -91,7 +91,7 @@ class TestPushFunction:
         assert "pushplus.plus/send" in args[0]
         body = kwargs["json"]
         assert body["token"] == "tok"
-        assert "成功" in body["title"]
+        assert body["title"] == "WeReadIt"
 
     def test_push_bark_success(self, mock_client: MagicMock) -> None:
         """bark 推送应 POST 到 BARK_PUSHER 指定的完整 URL，body 含 title/body。"""
@@ -102,7 +102,7 @@ class TestPushFunction:
         args, kwargs = mock_client.post.call_args
         assert args[0] == "https://api.day.app/device_key_123"
         body = kwargs["json"]
-        assert "成功" in body["title"]
+        assert body["title"] == "WeReadIt"
         assert body["body"] == "hello"
 
     def test_push_bark_full_url_trailing_slash(self, mock_client: MagicMock) -> None:

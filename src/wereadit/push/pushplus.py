@@ -19,7 +19,7 @@ class PushPlusPusher(Pusher):
 
     @with_retry()
     def send(self, content: str, is_success: bool = True) -> bool:
-        title = f"WeReadIt-{'成功' if is_success else '失败'}"
+        title = "WeReadIt"
         response = self.client.post(
             _PUSHPLUS_URL,
             json={"token": self.token, "title": title, "content": content},

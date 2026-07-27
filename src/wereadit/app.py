@@ -49,11 +49,11 @@ def main() -> int:
 
     push_method = cfg.push_method
     exit_code = 0
-    has_failure = False  # 推送状态标志：兑换失败但阅读成功时为 False；Token 过期等致命错误为 True
 
     # 推送消息组装：所有分支共用一个 PushMessage，最后统一渲染
     msg = PushMessage(
         account=cfg.cookies.get("wr_vid", ""),
+        reading_success=False,  # 默认失败，try 块内成功覆盖
     )
 
     try:
@@ -79,7 +79,7 @@ def main() -> int:
                     cfg = _inject_app_token(cfg, refresh_result)
                     token_refreshed_at = time.time()
                     platform_note = (
-                        f"平台自识别：{'iOS' if cfg.weread_platform == PLATFORM_IOS else 'Android'}"
+                        f"平台：{'iOS' if cfg.weread_platform == PLATFORM_IOS else 'Android'}"
                     )
                     logger.info(
                         "兑换 Token 已在阅读前刷新: %s...（%s）",
@@ -94,8 +94,8 @@ def main() -> int:
         from wereadit.core.reader import read_books
 
         result = read_books(client, cfg)
+        msg.reading_success = True
         msg.read_minutes = result.total_minutes
-        msg.metrics_summary = result.summary()
 
         # 兑换阅读奖励
         if cfg.weread_access_token:
@@ -114,9 +114,10 @@ def main() -> int:
                 msg.exchanged_card = exchange_result.exchanged_card
                 msg.keep_reading_days = exchange_result.keep_reading_days
                 msg.coin_balance = exchange_result.coin_balance
+                msg.exchange_success = True
                 if exchange_result.error:
                     msg.exchange_error = exchange_result.error
-                    msg.is_partial = True
+                    msg.exchange_success = False
             except ExchangeError as exc:
                 if exc.errcode == ERRCODE_TOKEN_EXPIRED:
                     # 排查 token 过快过期：告警中明确平台 + token 前 8 位，
@@ -137,54 +138,49 @@ def main() -> int:
                         f"（过期 Token 前 8 位: {token_preview}...）"
                     )
                     exit_code = 1
-                    has_failure = True
-                    msg.is_partial = True
+                    msg.exchange_success = False
                 else:
                     logger.error("兑换奖励异常: %s", exc)
                     msg.exchange_error = str(exc)
-                    msg.is_partial = True
+                    msg.exchange_success = False
             except Exception as exc:  # noqa: BLE001
                 logger.error("兑换奖励异常: %s", exc)
                 msg.exchange_error = str(exc)
-                msg.is_partial = True
+                msg.exchange_success = False
         else:
             logger.info("无可用兑换 Token（WEREAD_APP_CURL 未配置或刷新失败），跳过兑换")
             msg.exchange_skipped = True
             if refresh_diagnosis:
-                # 配了 APP_CURL 但刷新失败：兑换目标未达成，标记为可见失败
                 exit_code = 1
-                has_failure = True
-                msg.is_partial = True
+                msg.exchange_error = refresh_diagnosis
 
-        msg.refresh_diagnosis = refresh_diagnosis
         msg.platform_note = platform_note
-        msg.is_success = not has_failure
 
         # 推送成功通知
         if push_method:
             logger.info("开始推送...")
             push_content = format_push_message(msg)
-            push(push_content, push_method, client, cfg, is_success=not has_failure)
+            push(push_content, push_method, client, cfg, is_success=msg.reading_success)
         else:
             logger.info("未配置推送渠道，跳过推送")
 
     except CookieExpiredError as exc:
         logger.error("Cookie 刷新失败：%s", exc)
-        msg.fatal_error = f"Cookie 刷新失败：{exc}"
+        msg.reading_error = f"Cookie 刷新失败：{exc}"
         if push_method:
             push(format_push_message(msg), push_method, client, cfg, is_success=False)
         exit_code = 1
 
     except ReadFailedError as exc:
         logger.error("阅读熔断：%s", exc)
-        msg.fatal_error = f"阅读熔断：{exc}"
+        msg.reading_error = f"阅读熔断：{exc}"
         if push_method:
             push(format_push_message(msg), push_method, client, cfg, is_success=False)
         exit_code = 1
 
     except Exception as exc:  # noqa: BLE001
         logger.error("未捕获异常：%s\n%s", exc, traceback.format_exc())
-        msg.fatal_error = f"运行失败：{exc}"
+        msg.reading_error = f"运行失败：{exc}"
         if push_method:
             push(format_push_message(msg), push_method, client, cfg, is_success=False)
         exit_code = 1

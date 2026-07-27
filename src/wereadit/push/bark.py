@@ -27,7 +27,7 @@ class BarkPusher(Pusher):
     @with_retry()
     def send(self, content: str, is_success: bool = True) -> bool:
         url = (self.token or "").strip().rstrip("/")
-        title = f"WeReadIt-{'成功' if is_success else '失败'}"
+        title = "WeReadIt"
         response = self.client.post(
             url,
             json={"title": title, "body": content},
