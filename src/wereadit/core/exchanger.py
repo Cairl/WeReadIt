@@ -447,37 +447,11 @@ def exchange_awards(
     reading_time = award_data.get("readingTime", 0)
     reading_day = award_data.get("readingDay", 0)
     keep_reading_days = _extract_keep_reading_days(award_data)
-    coin_balance = _extract_coin_balance(award_data)
-    # 诊断：记录查询响应数值字段。DEBUG 级别供平时排查；WARNING 级别（解析失败时）
-    # 确保用户在默认 INFO 日志下也能看到全部数值字段，定位真实余额字段名。
-    _numeric_fields = {
-        k: v
-        for k, v in award_data.items()
-        if isinstance(v, int | float) and not isinstance(v, bool)
-    }
-    logger.debug("查询奖励响应顶层字段: %s", list(award_data.keys()))
-    logger.debug("查询响应数值字段: %s", _numeric_fields)
-    if coin_balance is None:
-        # 递归收集所有数值字段（含嵌套），WARNING 输出让 INFO 日志可见。
-        # 用户可从中找到真实余额值（如 23.92）对应的字段名，反馈后补进候选列表。
-        all_numeric = _collect_all_numeric_fields(award_data)
-        logger.warning(
-            "未能从查询响应中识别书币余额字段（已尝试 %s + 嵌套容器 %s）。"
-            "响应所有数值字段: %s。"
-            "请从中找到真实余额字段并反馈补进 _COIN_BALANCE_KEYS",
-            _COIN_BALANCE_KEYS, _COIN_BALANCE_CONTAINERS, all_numeric,
-        )
-    elif coin_balance == 0.0:
-        # 解析为 0 可能是"本次获得书币数"等 0 值字段冒充余额（真实余额非 0），
-        # 也可能余额确为 0。发 WARNING 输出全部数值字段，引导核对。
-        all_numeric = _collect_all_numeric_fields(award_data)
-        logger.warning(
-            "查询响应书币余额识别为 0.0（候选字段均为 0 值）；若与实际余额不符，"
-            "响应所有数值字段: %s，请确认真实余额字段名是否在候选列表",
-            all_numeric,
-        )
-    else:
-        logger.debug("查询响应识别到书币余额: %s", coin_balance)
+    # 余额由独立的 query_coin_balance（/web/pay/balance）查询；/exchange 查询接口
+    # 实测不返回钱包余额（响应全是 readingTime/readingDay 等阅读统计字段），
+    # 此处不再提取，避免每次运行输出误导性 WARNING。兑换响应若带余额仍会在
+    # 兑换循环中覆盖 coin_balance（作为独立查询失败时的兜底）。
+    coin_balance: float | None = None
     raw_awards = award_data.get("readtimeAwards", []) + award_data.get("readdayAwards", [])
     awards = [Award.from_dict(a) for a in raw_awards]
 
@@ -532,22 +506,14 @@ def exchange_awards(
                 )
                 success = True
                 last_exchange_resp = exchange_resp  # 记录最后一次兑换响应用于诊断
-                # 兑换响应可能带最新余额（兑换后），提取到则覆盖查询时的旧余额
+                # 兑换响应可能带余额，提取到则覆盖（查询接口不返回余额，coin_balance
+                # 初始 None）。作为独立 query_coin_balance 失败时的兜底。
                 new_balance = _extract_coin_balance(exchange_resp)
                 if new_balance is not None:
-                    # 兑换响应余额为 0 时不覆盖查询时的非零余额：
-                    # 兑换接口响应结构与查询可能不同，0 可能来自"本次获得书币数"
-                    # 等同义字段误匹配，而非真实余额清零（兑换只会让余额增加或不变）。
-                    # 避免查询时正确的 23.92 被兑换响应的 0 误覆盖成 0.00。
-                    if new_balance > 0 or coin_balance in (None, 0.0):
-                        coin_balance = new_balance
-                        logger.debug(
-                            "兑换响应识别到最新书币余额: %s", new_balance
-                        )
-                    else:
-                        logger.debug(
-                            "兑换响应余额候选为 0，保留查询时余额: %s", coin_balance
-                        )
+                    coin_balance = new_balance
+                    logger.debug(
+                        "兑换响应识别到最新书币余额: %s", new_balance
+                    )
                 break
             except ExchangeError as exc:
                 if exc.errcode == ERRCODE_TOKEN_EXPIRED:

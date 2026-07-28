@@ -237,30 +237,8 @@ class TestExchangeAwards:
         mock_client.post.return_value = mock_response
 
         result = exchange_awards(mock_client, cfg)
-        assert result.coin_balance == 23.92
-
-    def test_exchange_response_zero_not_overwrite_nonzero_balance(
-        self, mock_client: MagicMock
-    ) -> None:
-        """兑换响应余额为 0 时不覆盖查询时的非零余额。
-
-        回归 2026-07-28 推送问题：兑换接口响应结构与查询不同，0 可能来自
-        "本次获得书币数"等同义字段误匹配，不应把查询时正确的 23.92 覆盖成 0.0。
-        """
-        cfg = _make_cfg()
-        query_resp = _mock_award_data()
-        query_resp["bookCoin"] = 23.92  # 查询时正确余额
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        # 查询返回 23.92；2 次兑换响应均带 bookCoin=0（误匹配字段）
-        mock_response.json.side_effect = [
-            query_resp,
-            {"bookCoin": 0},
-            {"bookCoin": 0},
-        ]
-        mock_client.post.return_value = mock_response
-
-        result = exchange_awards(mock_client, cfg)
+        # 查询接口不再提取余额（由 query_coin_balance 独立查询），兑换响应同查询
+        # 响应（mock 固定返回），兑换时 _extract_coin_balance 偏好非零 → 23.92
         assert result.coin_balance == 23.92
 
     def test_optional_fields_none_when_absent(self, mock_client: MagicMock) -> None:
