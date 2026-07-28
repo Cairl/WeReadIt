@@ -29,10 +29,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 # 分隔线：20 个 U+2500
 _DIVIDER = "\u2500" * 20
+
+# 北京时间（UTC+8）：GitHub Actions runner 默认 UTC，推送时间戳需显示北京时间
+_BEIJING_TZ = timezone(timedelta(hours=8))
 
 
 @dataclass
@@ -92,7 +95,7 @@ def format_push_message(msg: PushMessage) -> str:
     阅读和兑换独立展示，各自按成功/失败决定显示详情还是原因。
     诊断信息追加在末尾。
     """
-    ts = msg.timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = msg.timestamp or datetime.now(_BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
     lines = [
         ts,

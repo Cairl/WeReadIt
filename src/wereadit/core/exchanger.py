@@ -367,7 +367,6 @@ def query_coin_balance(client: HttpClient, cfg: Config) -> float | None:
             all_numeric,
         )
     else:
-        logger.info("余额查询成功: %s", balance)
         logger.debug("余额查询响应数值字段: %s", all_numeric)
     return balance
 
