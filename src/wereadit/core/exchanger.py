@@ -110,7 +110,7 @@ class ExchangeResult:
     reading_time: int = 0  # 本周阅读时长（秒）
     reading_day: int = 0  # 本周阅读天数
     exchanged_coin: int = 0  # 兑换的书币数
-    exchanged_card: int = 0  # 兑换的体验卡天数
+    exchanged_card: int | None = None  # 兑换的体验卡天数（None=未兑换体验卡）
     skipped: int = 0  # 跳过的奖励数
     failed: int = 0  # 兑换失败的奖励数
     platform: str = ""  # 平台标识（iOS / Android）
@@ -456,6 +456,7 @@ def exchange_awards(
 
     # 逐个兑换
     exchanged_card = 0
+    card_acquired = False  # 是否实际兑换过体验卡（区分"未选体验卡"与"真实0天"）
     exchanged_coin = 0
     skipped = 0
     failed = 0
@@ -547,6 +548,7 @@ def exchange_awards(
             )
             if choice_type == CHOICE_CARD:
                 exchanged_card += choice.award_num
+                card_acquired = True
             else:
                 exchanged_coin += choice.award_num
         else:
@@ -566,11 +568,16 @@ def exchange_awards(
             _ex_numeric,
         )
 
+    # 无可兑换奖励：查询成功但无实际兑换（awards 为空或全部被策略/状态跳过），
+    # 追加状态回显，避免"开始兑换阅读奖励..."之后无任何后续日志
+    if exchanged_coin == 0 and exchanged_card == 0 and failed == 0:
+        logger.info("无需兑换阅读奖励")
+
     return ExchangeResult(
         reading_time=reading_time,
         reading_day=reading_day,
         exchanged_coin=exchanged_coin,
-        exchanged_card=exchanged_card,
+        exchanged_card=exchanged_card if card_acquired else None,
         skipped=skipped,
         failed=failed,
         platform=platform_name,

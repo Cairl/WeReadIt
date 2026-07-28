@@ -78,14 +78,12 @@ def main() -> int:
                 if refresh_result.ok:
                     cfg = _inject_app_token(cfg, refresh_result)
                     token_refreshed_at = time.time()
-                    platform_note = (
-                        f"平台：{'iOS' if cfg.weread_platform == PLATFORM_IOS else 'Android'}"
+                    platform_label = (
+                        "iOS" if cfg.weread_platform == PLATFORM_IOS else "Android"
                     )
-                    logger.info(
-                        "兑换 Token 已在阅读前刷新: %s...（%s）",
-                        refresh_result.token[:8],
-                        platform_note,
-                    )
+                    platform_note = f"平台：{platform_label}"
+                    logger.info("App cURL 已刷新")
+                    logger.info("当前阅读平台: %s", platform_label)
                 else:
                     refresh_diagnosis = refresh_result.diagnosis
                     logger.warning("阅读前刷新 Token 失败: %s", refresh_diagnosis)

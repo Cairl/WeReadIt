@@ -20,7 +20,7 @@ def setup_logging() -> logging.Logger:
 
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(levelname)-8s - %(name)s - %(message)s")
+        logging.Formatter("%(asctime)s - %(levelname)-8s - %(message)s")
     )
     root.addHandler(handler)
 
@@ -60,7 +60,7 @@ def make_refresh_print():
         root.removeHandler(h)
     safe_handler = _RefreshSafeHandler()
     safe_handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(levelname)-8s - %(name)s - %(message)s")
+        logging.Formatter("%(asctime)s - %(levelname)-8s - %(message)s")
     )
     root.addHandler(safe_handler)
     root.setLevel(logging.INFO)

@@ -254,6 +254,54 @@ class TestExchangeAwards:
         assert result.keep_reading_days is None
         assert result.coin_balance is None
 
+    def test_no_awards_logs_no_exchange_message(
+        self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """查询成功但无可兑换奖励（awards 为空）时输出"无需兑换阅读奖励"。"""
+        cfg = _make_cfg()
+        query_resp = _mock_award_data()
+        query_resp["readtimeAwards"] = []
+        query_resp["readdayAwards"] = []
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = query_resp
+        mock_client.post.return_value = mock_response
+
+        with caplog.at_level(logging.INFO, logger="wereadit.core.exchanger"):
+            result = exchange_awards(mock_client, cfg)
+
+        assert result.exchanged_coin == 0
+        assert result.exchanged_card is None
+        assert result.failed == 0
+        assert "无需兑换阅读奖励" in caplog.messages
+
+    def test_card_exchange_returns_card_days(self, mock_client: MagicMock) -> None:
+        """策略选体验卡（CHOICE_CARD=1）时 exchanged_card 返回实际天数。"""
+        cfg = _make_cfg(exchange_award="1,1,1,1,1,1,1,1")  # 全选体验卡
+        query_resp = _mock_award_data()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.side_effect = [query_resp, {"ok": True}, {"ok": True}]
+        mock_client.post.return_value = mock_response
+
+        result = exchange_awards(mock_client, cfg)
+        assert result.exchanged_card == 2  # 2 个可领取，每个 awardNum=1
+        assert result.exchanged_coin == 0
+        assert result.failed == 0
+
+    def test_coin_only_exchange_returns_none_card(self, mock_client: MagicMock) -> None:
+        """策略选书币（未兑换体验卡）时 exchanged_card 为 None（推送显示"未知"）。"""
+        cfg = _make_cfg()  # 默认全选书币
+        query_resp = _mock_award_data()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.side_effect = [query_resp, {"ok": True}, {"ok": True}]
+        mock_client.post.return_value = mock_response
+
+        result = exchange_awards(mock_client, cfg)
+        assert result.exchanged_coin == 2
+        assert result.exchanged_card is None  # 未兑换体验卡
+
 
 class TestExchangeTokenRefresh:
     """补刷保险：token 年龄超阈值时兑换前调 refresher 补刷。"""

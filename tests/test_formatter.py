@@ -48,7 +48,7 @@ class TestFormatSuccess:
         assert "书币钱包" not in text
 
     def test_success_without_optional_fields(self) -> None:
-        """无可选字段时对应行省略。"""
+        """余额与体验卡均未获取时显示"未知"。"""
         msg = PushMessage(
             account="12345",
             reading_success=True,
@@ -56,7 +56,7 @@ class TestFormatSuccess:
             weekly_read_seconds=3600,
             exchange_success=True,
             exchanged_coin=1,
-            exchanged_card=0,
+            exchanged_card=None,
         )
         text = format_push_message(msg)
 
@@ -64,12 +64,28 @@ class TestFormatSuccess:
         assert "本轮阅读：30 分钟" in text
         assert "本周阅读：1 小时" in text
         assert "兑换状态：成功" in text
-        # coin_balance 未设置（接口未返回可识别字段）时只显示本次获得，
-        # 不兜底为 0.00 避免误导用户以为余额是 0
-        assert "赠币：+1" in text
+        # coin_balance 未设置（未获取到余额）时显示"未知 (+本次获得)"
+        assert "赠币：未知 (+1)" in text
         assert "0.00" not in text
-        assert "体验卡：0 天" in text
+        # exchanged_card=None（未兑换体验卡）时显示"未知"
+        assert "体验卡：未知" in text
         assert "连续阅读" not in text
+
+    def test_card_days_displayed_when_present(self) -> None:
+        """体验卡有值时显示具体天数，不显示"未知"。"""
+        msg = PushMessage(
+            account="12345",
+            reading_success=True,
+            read_minutes=60,
+            exchange_success=True,
+            exchanged_coin=0,
+            exchanged_card=3,
+            coin_balance=9.92,
+        )
+        text = format_push_message(msg)
+        assert "体验卡：3 天" in text
+        assert "体验卡：未知" not in text
+        assert "赠币：9.92" in text
 
     def test_minimal_success(self) -> None:
         """阅读成功，兑换跳过（未配置）"""

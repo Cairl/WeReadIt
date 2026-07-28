@@ -65,7 +65,7 @@ def refresh_cookie(client: HttpClient, cfg: Config) -> str:
     new_skey = _get_wr_skey(client, cfg)
     if new_skey:
         client.update_cookie("wr_skey", new_skey)
-        logger.info("密钥刷新成功：%s***", new_skey[:2])
+        logger.info("Web cURL 已刷新")
         return new_skey
 
     err_msg = "无法获取新密钥或者 WEREADIT_CURL_BASH 配置有误，终止运行"

@@ -194,7 +194,8 @@ def refresh_app_token(login_curl: str) -> RefreshResult:
             diagnosis="login curl 解析失败：未找到 URL，请检查 WEREAD_APP_CURL 是否为完整 cURL 命令"
         )
 
-    logger.info("刷新 App Token: POST %s", url)
+    # 请求 URL 属调试细节，降级 DEBUG；INFO 层只回显 app.py 的"App cURL 已刷新"状态行
+    logger.debug("刷新 App Token: POST %s", url)
     last_network_error = ""
     for attempt in range(LOGIN_MAX_ATTEMPTS):
         try:

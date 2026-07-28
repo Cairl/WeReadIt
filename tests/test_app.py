@@ -57,7 +57,7 @@ def _mock_exchange_result() -> ExchangeResult:
         reading_time=3600,
         reading_day=5,
         exchanged_coin=2,
-        exchanged_card=0,
+        exchanged_card=None,
         skipped=1,
         failed=0,
         platform="Android",
