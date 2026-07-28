@@ -13,6 +13,11 @@ FIX_SYNCKEY_URL = "https://weread.qq.com/web/book/chapterInfos"
 # 兑换接口
 EXCHANGE_URL = "https://i.weread.qq.com/weekly/exchange"
 
+# 余额查询接口（独立于兑换，无论是否兑换都查询当前赠币/书币余额）
+# /exchange 查询接口实测不返回钱包余额，需独立调用。
+# 字段基于微信读书客户端逆向文档：响应 data.totalCoins / data.newBalance
+BALANCE_URL = "https://i.weread.qq.com/reader/welfareCoin"
+
 # App 端 /login 接口超时（用于刷新 skey/accessToken，实现兑换 Token 自动续期）
 LOGIN_TIMEOUT = 15
 # App 端 /login 重试参数（刷新 token，网络异常时退避重试）

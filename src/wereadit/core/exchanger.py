@@ -31,6 +31,7 @@ from wereadit.constants import (
     ANDROID_PF,
     ANDROID_UA,
     AWARD_LEVEL_IDS,
+    BALANCE_URL,
     CHOICE_CARD,
     CHOICE_NONE,
     ERRCODE_TOKEN_EXPIRED,
@@ -290,6 +291,86 @@ def _extract_coin_balance(
     return 0.0
 
 
+def query_coin_balance(client: HttpClient, cfg: Config) -> float | None:
+    """独立查询当前书币/赠币余额（不依赖兑换）。
+
+    /exchange 查询接口（isExchangeAward=0）实测不返回钱包余额，兑换响应只在
+    兑换时才有。本函数调用 /reader/welfareCoin 独立查询，确保无论是否发生兑换
+    都能在推送中显示当前余额。
+
+    字段基于微信读书客户端逆向文档：响应 data.totalCoins（当前总阅读币）、
+    data.newBalance（领取后新余额）。若实际字段名不符，WARNING 输出全部数值
+    字段供定位。
+
+    Args:
+        client: HTTP 客户端（自带 web cookie）
+        cfg: 运行时配置（优先用 App token 认证，无则用 web cookie）
+
+    Returns:
+        余额值（float）；查询失败或未识别到返回 None
+    """
+    # 优先用 App 端 header（skey/accessToken）认证，与兑换接口一致；
+    # 无 App token 时回退 web cookie（client 自带）
+    vid = cfg.cookies.get("wr_vid", "")
+    headers: dict[str, str] | None = None
+    if cfg.weread_access_token and vid:
+        headers = _build_headers(cfg.weread_access_token, vid, cfg.weread_platform)
+    try:
+        resp = client.get(BALANCE_URL, headers=headers, timeout=EXCHANGE_TIMEOUT)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("余额查询请求异常: %s", exc)
+        return None
+
+    try:
+        data = resp.json()
+    except ValueError:
+        logger.warning("余额查询响应非 JSON: HTTP=%s", resp.status_code)
+        return None
+
+    if resp.status_code != 200 or (
+        isinstance(data, dict) and data.get("errcode") not in (None, 0)
+    ):
+        logger.warning(
+            "余额查询失败: HTTP=%s, 响应=%s",
+            resp.status_code,
+            str(data)[:500],
+        )
+        return None
+
+    # 余额可能在 data 子对象或顶层
+    inner = data.get("data", data) if isinstance(data, dict) else data
+    if not isinstance(inner, dict):
+        inner = data if isinstance(data, dict) else {}
+
+    # 优先取逆向文档明确的字段，再用候选列表容错
+    balance: float | None = None
+    for key in ("totalCoins", "newBalance"):
+        value = inner.get(key)
+        if (
+            isinstance(value, int | float)
+            and not isinstance(value, bool)
+            and value >= 0
+        ):
+            balance = float(value)
+            break
+    if balance is None:
+        balance = _extract_coin_balance(inner)
+
+    all_numeric = _collect_all_numeric_fields(
+        data if isinstance(data, dict) else {}
+    )
+    if balance is None:
+        logger.warning(
+            "余额查询响应未识别到余额字段。响应所有数值字段: %s。"
+            "请从中找到真实余额字段并反馈",
+            all_numeric,
+        )
+    else:
+        logger.info("余额查询成功: %s", balance)
+        logger.debug("余额查询响应数值字段: %s", all_numeric)
+    return balance
+
+
 def exchange_awards(
     client: HttpClient,
     cfg: Config,
@@ -404,6 +485,7 @@ def exchange_awards(
     exchanged_coin = 0
     skipped = 0
     failed = 0
+    last_exchange_resp: dict[str, Any] | None = None  # 诊断用：最后一次成功兑换响应
 
     for award in awards:
         if award.award_status != 1:
@@ -448,6 +530,7 @@ def exchange_awards(
                     client, auth_token, vid, cfg.weread_platform, exchange_body
                 )
                 success = True
+                last_exchange_resp = exchange_resp  # 记录最后一次兑换响应用于诊断
                 # 兑换响应可能带最新余额（兑换后），提取到则覆盖查询时的旧余额
                 new_balance = _extract_coin_balance(exchange_resp)
                 if new_balance is not None:
@@ -503,6 +586,19 @@ def exchange_awards(
         else:
             logger.error("兑换 %s 失败（重试 %d 次）", award.award_level_desc, EXCHANGE_MAX_RETRY)
             failed += 1
+
+    # 兑换响应诊断：查询接口（isExchangeAward=0）实测不返回钱包余额（响应全是
+    # readingTime/readingDay 等阅读统计字段），余额可能只在兑换响应
+    # （isExchangeAward=1）里返回。若最终未识别到正数余额且发生过兑换，WARNING
+    # 输出最后一次兑换响应的全部数值字段，供定位真实余额字段名补进 _COIN_BALANCE_KEYS。
+    if (coin_balance is None or coin_balance == 0.0) and last_exchange_resp is not None:
+        _ex_numeric = _collect_all_numeric_fields(last_exchange_resp)
+        logger.warning(
+            "查询接口未返回余额字段，兑换响应也未识别到正数书币余额。"
+            "最后一次兑换响应数值字段: %s。"
+            "请从中找到真实余额字段并反馈补进 _COIN_BALANCE_KEYS",
+            _ex_numeric,
+        )
 
     return ExchangeResult(
         reading_time=reading_time,

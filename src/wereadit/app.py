@@ -97,6 +97,13 @@ def main() -> int:
         msg.reading_success = True
         msg.read_minutes = result.total_minutes
 
+        # 查询当前余额（独立于兑换，无论是否兑换都显示）
+        from wereadit.core.exchanger import query_coin_balance
+
+        balance = query_coin_balance(client, cfg)
+        if balance is not None:
+            msg.coin_balance = balance
+
         # 兑换阅读奖励
         if cfg.weread_access_token:
             logger.info("开始兑换阅读奖励...")
@@ -113,7 +120,9 @@ def main() -> int:
                 msg.exchanged_coin = exchange_result.exchanged_coin
                 msg.exchanged_card = exchange_result.exchanged_card
                 msg.keep_reading_days = exchange_result.keep_reading_days
-                msg.coin_balance = exchange_result.coin_balance
+                # 兑换响应余额仅作补充：独立余额查询失败时才用兑换响应的
+                if msg.coin_balance is None and exchange_result.coin_balance is not None:
+                    msg.coin_balance = exchange_result.coin_balance
                 msg.exchange_success = True
                 if exchange_result.error:
                     msg.exchange_error = exchange_result.error

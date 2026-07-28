@@ -14,7 +14,7 @@ from wereadit.constants import (
     CHOICE_COIN,
     ERRCODE_TOKEN_EXPIRED,
 )
-from wereadit.core.exchanger import _parse_strategy, exchange_awards
+from wereadit.core.exchanger import _parse_strategy, exchange_awards, query_coin_balance
 from wereadit.core.token_refresher import RefreshResult
 from wereadit.exceptions import ExchangeError
 
@@ -417,3 +417,56 @@ class TestExchangeLogging:
         assert "403" in warning_text
         assert "-999" in warning_text
         assert "风控拦截" in warning_text
+
+
+class TestQueryCoinBalance:
+    """独立余额查询：无论是否兑换都查询当前赠币/书币余额。"""
+
+    def test_success_total_coins(self, mock_client: MagicMock) -> None:
+        """响应 data.totalCoins 应被提取为余额。"""
+        cfg = _make_cfg()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"errcode": 0, "data": {"totalCoins": 23.92}}
+        mock_client.get.return_value = mock_resp
+
+        assert query_coin_balance(mock_client, cfg) == 23.92
+
+    def test_success_new_balance(self, mock_client: MagicMock) -> None:
+        """无 totalCoins 时回退 data.newBalance。"""
+        cfg = _make_cfg()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": {"newBalance": 25.0}}
+        mock_client.get.return_value = mock_resp
+
+        assert query_coin_balance(mock_client, cfg) == 25.0
+
+    def test_failure_errcode_returns_none(self, mock_client: MagicMock) -> None:
+        """响应含 errcode（非 0）时返回 None。"""
+        cfg = _make_cfg()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"errcode": -1, "errmsg": "need login"}
+        mock_client.get.return_value = mock_resp
+
+        assert query_coin_balance(mock_client, cfg) is None
+
+    def test_no_app_token_uses_web_cookie(self, mock_client: MagicMock) -> None:
+        """无 App token 时 headers 为 None，回退 web cookie 仍查询。"""
+        cfg = _make_cfg(app_token="", app_token_key="")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": {"totalCoins": 10.0}}
+        mock_client.get.return_value = mock_resp
+
+        assert query_coin_balance(mock_client, cfg) == 10.0
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["headers"] is None
+
+    def test_network_exception_returns_none(self, mock_client: MagicMock) -> None:
+        """请求异常时返回 None，不影响主流程。"""
+        cfg = _make_cfg()
+        mock_client.get.side_effect = Exception("network error")
+
+        assert query_coin_balance(mock_client, cfg) is None
