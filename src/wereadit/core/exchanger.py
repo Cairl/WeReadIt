@@ -295,28 +295,22 @@ def query_coin_balance(client: HttpClient, cfg: Config) -> float | None:
     """独立查询当前书币/赠币余额（不依赖兑换）。
 
     /exchange 查询接口（isExchangeAward=0）实测不返回钱包余额，兑换响应只在
-    兑换时才有。本函数调用 /reader/welfareCoin 独立查询，确保无论是否发生兑换
-    都能在推送中显示当前余额。
+    兑换时才有。本函数调用 web 端 /web/pay/balance（POST，web cookie 认证）
+    独立查询，确保无论是否发生兑换都能在推送中显示当前余额。
 
-    字段基于微信读书客户端逆向文档：响应 data.totalCoins（当前总阅读币）、
-    data.newBalance（领取后新余额）。若实际字段名不符，WARNING 输出全部数值
-    字段供定位。
+    响应字段（参考 wechat-reader-ext 项目 Me.vue）：giftBalance（iOS 书币）、
+    peerBalance（Android 书币）。按当前平台优先取，另一平台兜底。
 
     Args:
-        client: HTTP 客户端（自带 web cookie）
-        cfg: 运行时配置（优先用 App token 认证，无则用 web cookie）
+        client: HTTP 客户端（自带 web cookie，web 端接口认证用）
+        cfg: 运行时配置（取 weread_platform 决定优先字段）
 
     Returns:
         余额值（float）；查询失败或未识别到返回 None
     """
-    # 优先用 App 端 header（skey/accessToken）认证，与兑换接口一致；
-    # 无 App token 时回退 web cookie（client 自带）
-    vid = cfg.cookies.get("wr_vid", "")
-    headers: dict[str, str] | None = None
-    if cfg.weread_access_token and vid:
-        headers = _build_headers(cfg.weread_access_token, vid, cfg.weread_platform)
+    body = {"zoneid": "1", "release": "1", "pf": "weread_wx-2001-iap-2001-iphone"}
     try:
-        resp = client.get(BALANCE_URL, headers=headers, timeout=EXCHANGE_TIMEOUT)
+        resp = client.post(BALANCE_URL, json=body, timeout=EXCHANGE_TIMEOUT)
     except Exception as exc:  # noqa: BLE001
         logger.warning("余额查询请求异常: %s", exc)
         return None
@@ -324,7 +318,9 @@ def query_coin_balance(client: HttpClient, cfg: Config) -> float | None:
     try:
         data = resp.json()
     except ValueError:
-        logger.warning("余额查询响应非 JSON: HTTP=%s", resp.status_code)
+        logger.warning(
+            "余额查询响应非 JSON: HTTP=%s, 原文=%s", resp.status_code, resp.text[:500]
+        )
         return None
 
     if resp.status_code != 200 or (
@@ -337,32 +333,37 @@ def query_coin_balance(client: HttpClient, cfg: Config) -> float | None:
         )
         return None
 
-    # 余额可能在 data 子对象或顶层
+    # 余额字段可能在顶层或 data 子对象
     inner = data.get("data", data) if isinstance(data, dict) else data
     if not isinstance(inner, dict):
         inner = data if isinstance(data, dict) else {}
 
-    # 优先取逆向文档明确的字段，再用候选列表容错
-    balance: float | None = None
-    for key in ("totalCoins", "newBalance"):
-        value = inner.get(key)
-        if (
-            isinstance(value, int | float)
-            and not isinstance(value, bool)
-            and value >= 0
-        ):
-            balance = float(value)
-            break
-    if balance is None:
-        balance = _extract_coin_balance(inner)
+    gift = inner.get("giftBalance")
+    peer = inner.get("peerBalance")
 
-    all_numeric = _collect_all_numeric_fields(
-        data if isinstance(data, dict) else {}
-    )
+    def _pick(*vals: object) -> float | None:
+        # 优先非零值，其次 0 值，都无效返回 None
+        for v in vals:
+            if isinstance(v, int | float) and not isinstance(v, bool) and v > 0:
+                return float(v)
+        for v in vals:
+            if isinstance(v, int | float) and not isinstance(v, bool) and v >= 0:
+                return float(v)
+        return None
+
+    # 按当前平台优先，另一平台兜底
+    if cfg.weread_platform == PLATFORM_IOS:
+        balance = _pick(gift, peer)
+    else:
+        balance = _pick(peer, gift)
+
+    all_numeric = _collect_all_numeric_fields(inner)
     if balance is None:
         logger.warning(
-            "余额查询响应未识别到余额字段。响应所有数值字段: %s。"
-            "请从中找到真实余额字段并反馈",
+            "余额查询响应未识别到余额字段。HTTP=%s, 响应原文=%s, 数值字段=%s。"
+            "请据此判断接口是否正确或反馈真实字段",
+            resp.status_code,
+            resp.text[:500],
             all_numeric,
         )
     else:
