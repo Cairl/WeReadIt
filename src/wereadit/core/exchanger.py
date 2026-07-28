@@ -61,6 +61,9 @@ _KEEP_READING_KEYS = (
 )
 # 响应中可能表示"书币钱包余额"的字段名（按优先级尝试）
 # 不放 "coin" / "balance" 这类过于通用的名字，避免误匹配"本次获得数"等字段
+# 2026-07-29: 追加赠币（presentCoin / giftCoin / freeCoin）系列字段。
+# 微信读书"书币"与"赠币"可能分属不同字段，原列表只覆盖 bookCoin 系，
+# 导致用户真实赠币余额（如 23.92）所在字段未被识别，推送显示"赠币：0"。
 _COIN_BALANCE_KEYS = (
     "bookCoin",
     "bookCoinBalance",
@@ -72,6 +75,14 @@ _COIN_BALANCE_KEYS = (
     "coinBalance",
     "remainCoin",
     "totalCoin",
+    # 赠币体系
+    "presentCoin",
+    "presentCoinBalance",
+    "presentCoinNum",
+    "giftCoin",
+    "giftCoinBalance",
+    "freeCoin",
+    "freeCoinBalance",
 )
 # 余额字段可能嵌套在这些子对象里（递归查找，深度限 3 层）
 _COIN_BALANCE_CONTAINERS = (
@@ -81,6 +92,8 @@ _COIN_BALANCE_CONTAINERS = (
     "userInfo",
     "walletInfo",
     "userWallet",
+    "coinInfo",
+    "bookCoinInfo",
 )
 
 
@@ -201,6 +214,27 @@ def _extract_keep_reading_days(award_data: dict[str, Any]) -> int | None:
         if isinstance(value, int | float) and value > 0:
             return int(value)
     return None
+
+
+def _collect_all_numeric_fields(
+    data: dict[str, Any], prefix: str = "", depth: int = 0
+) -> dict[str, Any]:
+    """递归收集响应中所有数值字段，键为点分路径（如 'wallet.bookCoin'）。
+
+    诊断用途：当 _extract_coin_balance 返回 None 时，用 WARNING 输出全部数值字段，
+    让用户在默认 INFO 日志下即可定位真实余额字段名（如 23.92 对应哪个字段），
+    不必开 DEBUG。深度限 3 层，与余额提取的递归深度一致。
+    """
+    if depth > 3:
+        return {}
+    result: dict[str, Any] = {}
+    for key, value in data.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            result[path] = value
+        elif isinstance(value, dict):
+            result.update(_collect_all_numeric_fields(value, path, depth + 1))
+    return result
 
 
 def _collect_coin_balance_candidates(
@@ -332,28 +366,33 @@ def exchange_awards(
     reading_day = award_data.get("readingDay", 0)
     keep_reading_days = _extract_keep_reading_days(award_data)
     coin_balance = _extract_coin_balance(award_data)
-    # 排查余额字段名：记录查询响应顶层字段 + 数值类型字段，
-    # 便于在 _extract_coin_balance 返回 None 时从日志定位实际字段名
-    logger.debug("查询奖励响应顶层字段: %s", list(award_data.keys()))
+    # 诊断：记录查询响应数值字段。DEBUG 级别供平时排查；WARNING 级别（解析失败时）
+    # 确保用户在默认 INFO 日志下也能看到全部数值字段，定位真实余额字段名。
     _numeric_fields = {
         k: v
         for k, v in award_data.items()
         if isinstance(v, int | float) and not isinstance(v, bool)
     }
+    logger.debug("查询奖励响应顶层字段: %s", list(award_data.keys()))
     logger.debug("查询响应数值字段: %s", _numeric_fields)
     if coin_balance is None:
+        # 递归收集所有数值字段（含嵌套），WARNING 输出让 INFO 日志可见。
+        # 用户可从中找到真实余额值（如 23.92）对应的字段名，反馈后补进候选列表。
+        all_numeric = _collect_all_numeric_fields(award_data)
         logger.warning(
-            "未能从查询响应中识别书币余额字段（已尝试 %s + 嵌套容器 %s），"
-            "推送将不显示余额；请用上述 DEBUG 日志确认实际字段名",
-            _COIN_BALANCE_KEYS, _COIN_BALANCE_CONTAINERS,
+            "未能从查询响应中识别书币余额字段（已尝试 %s + 嵌套容器 %s）。"
+            "响应所有数值字段: %s。"
+            "请从中找到真实余额字段并反馈补进 _COIN_BALANCE_KEYS",
+            _COIN_BALANCE_KEYS, _COIN_BALANCE_CONTAINERS, all_numeric,
         )
     elif coin_balance == 0.0:
         # 解析为 0 可能是"本次获得书币数"等 0 值字段冒充余额（真实余额非 0），
-        # 也可能余额确为 0。发 WARNING 引导核对 DEBUG 数值字段，确认是否需要
-        # 把真实余额字段名补进 _COIN_BALANCE_KEYS。
+        # 也可能余额确为 0。发 WARNING 输出全部数值字段，引导核对。
+        all_numeric = _collect_all_numeric_fields(award_data)
         logger.warning(
             "查询响应书币余额识别为 0.0（候选字段均为 0 值）；若与实际余额不符，"
-            "请检查 DEBUG 日志中数值字段，可能真实余额字段名不在候选列表",
+            "响应所有数值字段: %s，请确认真实余额字段名是否在候选列表",
+            all_numeric,
         )
     else:
         logger.debug("查询响应识别到书币余额: %s", coin_balance)
