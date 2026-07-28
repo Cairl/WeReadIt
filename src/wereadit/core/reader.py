@@ -51,7 +51,9 @@ from wereadit.utils.crypto import sign_request
 logger = logging.getLogger(__name__)
 
 
-def refresh_cookie(client: HttpClient, cfg: Config) -> str:
+def refresh_cookie(
+    client: HttpClient, cfg: Config, *, announce: bool = True
+) -> str:
     """刷新 cookie 密钥 wr_skey。
 
     尝试 COOKIE_DATA_VARIANTS 中的多种 payload，成功则更新 client 的 cookie 并返回新 skey。
@@ -61,11 +63,16 @@ def refresh_cookie(client: HttpClient, cfg: Config) -> str:
     - 启动时强制刷新:让服务器记录"客户端上线",拿到新鲜 wr_skey
     - read 失败后刷新:被动续期,继续本次循环(不 sleep 不递增 index)
     详见 wxread_keepalive_analysis.md 第 4.1 节。
+
+    Args:
+        announce: 是否打 INFO 日志广播"Web cURL 已刷新"。read_books 启动保活
+            握手时传 False（app.py 已在阅读前广播过），避免重复刷屏。
     """
     new_skey = _get_wr_skey(client, cfg)
     if new_skey:
         client.update_cookie("wr_skey", new_skey)
-        logger.info("Web cURL 已刷新")
+        if announce:
+            logger.info("Web cURL 已刷新")
         return new_skey
 
     err_msg = "无法获取新密钥或者 WEREADIT_CURL_BASH 配置有误，终止运行"
@@ -256,7 +263,8 @@ def read_books(client: HttpClient, cfg: Config) -> ReadResult:
     - 失败后不 sleep 不递增 index: 本次重试不计入进度
     """
     # 启动强制刷新（【保活策略】不能删）
-    refresh_cookie(client, cfg)
+    # announce=False：app.py 已在阅读前广播过 Web 刷新，此处为保活握手静默刷新
+    refresh_cookie(client, cfg, announce=False)
 
     data: dict[str, Any] = dict(DEFAULT_READ_DATA)
     total = cfg.read_num

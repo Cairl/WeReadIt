@@ -64,8 +64,9 @@ class PushMessage:
     exchange_error: str = ""  # 兑换失败原因
     exchange_skipped: bool = False  # 是否跳过兑换（未配置 token 等）
     exchanged_coin: int = 0  # 兑换的书币数
-    exchanged_card: int | None = None  # 兑换的体验卡天数（None=未获取/未兑换）
-    coin_balance: float | None = None  # 书币钱包余额（可选）
+    exchanged_card: int | None = None  # 本次兑换获得的体验卡天数（None=未发生兑换）
+    coin_balance: float | None = None  # 书币钱包余额（可选，None=未获取）
+    card_balance: int | None = None  # 体验卡当前剩余天数（可选，None=未获取）
 
     # 诊断信息（可选，追加在末尾）
     refresh_diagnosis: str = ""  # Token 自动续期诊断
@@ -153,9 +154,13 @@ def format_push_message(msg: PushMessage) -> str:
             lines.append(f"赠币：未知 (+{msg.exchanged_coin})")
         else:
             lines.append("赠币：未知")
-        # 体验卡：仅在本次实际兑换过体验卡时显示天数，否则显示"未知"
-        if msg.exchanged_card is not None:
-            lines.append(f"体验卡：{msg.exchanged_card} 天")
+        # 体验卡：显示当前剩余天数（card_balance），未获取显示"未知"；
+        # 本次兑换获得体验卡时附 (+N)，与赠币行格式一致
+        if msg.card_balance is not None:
+            card_str = f"{msg.card_balance} 天"
+            if msg.exchanged_card is not None and msg.exchanged_card > 0:
+                card_str += f" (+{msg.exchanged_card})"
+            lines.append(f"体验卡：{card_str}")
         else:
             lines.append("体验卡：未知")
     elif msg.exchange_skipped and not msg.exchange_error:

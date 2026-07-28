@@ -10,11 +10,28 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from wereadit.app import main
 from wereadit.config import Config
 from wereadit.constants import ERRCODE_TOKEN_EXPIRED, PLATFORM_IOS
 from wereadit.core.exchanger import ExchangeResult
-from wereadit.exceptions import ExchangeError
+from wereadit.exceptions import CookieExpiredError, ExchangeError
+
+
+@pytest.fixture(autouse=True)
+def _stub_refresh_cookie():
+    """app.py 阅读前会提前调 refresh_cookie 刷新 Web wr_skey。
+
+    test_app 的 HttpClient 被 mock，refresh_cookie 内部 _get_wr_skey 会走完
+    3 轮重试 + sleep 才抛 CookieExpiredError，拖慢测试。这里直接 stub 成抛
+    CookieExpiredError，app.py 的 try 包裹会捕获并继续，行为等价。
+    """
+    with patch(
+        "wereadit.core.reader.refresh_cookie",
+        side_effect=CookieExpiredError("test stub"),
+    ):
+        yield
 
 
 def _make_cfg(**overrides) -> Config:

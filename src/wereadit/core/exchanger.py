@@ -291,29 +291,33 @@ def _extract_coin_balance(
     return 0.0
 
 
-def query_coin_balance(client: HttpClient, cfg: Config) -> float | None:
-    """独立查询当前书币/赠币余额（不依赖兑换）。
+def query_coin_balance(
+    client: HttpClient, cfg: Config
+) -> tuple[float | None, int | None]:
+    """独立查询当前书币/赠币余额与体验卡剩余天数（不依赖兑换）。
 
     /exchange 查询接口（isExchangeAward=0）实测不返回钱包余额，兑换响应只在
     兑换时才有。本函数调用 web 端 /web/pay/balance（POST，web cookie 认证）
-    独立查询，确保无论是否发生兑换都能在推送中显示当前余额。
+    独立查询，确保无论是否发生兑换都能在推送中显示当前余额与体验卡剩余。
 
     响应字段（参考 wechat-reader-ext 项目 Me.vue）：giftBalance（iOS 书币）、
-    peerBalance（Android 书币）。按当前平台优先取，另一平台兜底。
+    peerBalance（Android 书币）、welfare.expiredTime（体验卡/无限卡剩余秒数，
+    转 int(秒 // 86400) 天）。书币按当前平台优先取，另一平台兜底。
 
     Args:
         client: HTTP 客户端（自带 web cookie，web 端接口认证用）
         cfg: 运行时配置（取 weread_platform 决定优先字段）
 
     Returns:
-        余额值（float）；查询失败或未识别到返回 None
+        (coin_balance, card_balance)：余额（float）与体验卡剩余天数（int）；
+        查询失败或未识别到对应字段为 None
     """
     body = {"zoneid": "1", "release": "1", "pf": "weread_wx-2001-iap-2001-iphone"}
     try:
         resp = client.post(BALANCE_URL, json=body, timeout=EXCHANGE_TIMEOUT)
     except Exception as exc:  # noqa: BLE001
         logger.warning("余额查询请求异常: %s", exc)
-        return None
+        return None, None
 
     try:
         data = resp.json()
@@ -321,7 +325,7 @@ def query_coin_balance(client: HttpClient, cfg: Config) -> float | None:
         logger.warning(
             "余额查询响应非 JSON: HTTP=%s, 原文=%s", resp.status_code, resp.text[:500]
         )
-        return None
+        return None, None
 
     if resp.status_code != 200 or (
         isinstance(data, dict) and data.get("errcode") not in (None, 0)
@@ -331,7 +335,7 @@ def query_coin_balance(client: HttpClient, cfg: Config) -> float | None:
             resp.status_code,
             str(data)[:500],
         )
-        return None
+        return None, None
 
     # 余额字段可能在顶层或 data 子对象
     inner = data.get("data", data) if isinstance(data, dict) else data
@@ -357,6 +361,14 @@ def query_coin_balance(client: HttpClient, cfg: Config) -> float | None:
     else:
         balance = _pick(peer, gift)
 
+    # 体验卡（无限卡）剩余天数：welfare.expiredTime 是秒数，转天
+    card_balance: int | None = None
+    welfare = inner.get("welfare") if isinstance(inner, dict) else None
+    if isinstance(welfare, dict):
+        expired_time = welfare.get("expiredTime")
+        if isinstance(expired_time, int | float) and not isinstance(expired_time, bool):
+            card_balance = int(expired_time // 86400)
+
     all_numeric = _collect_all_numeric_fields(inner)
     if balance is None:
         logger.warning(
@@ -368,7 +380,7 @@ def query_coin_balance(client: HttpClient, cfg: Config) -> float | None:
         )
     else:
         logger.debug("余额查询响应数值字段: %s", all_numeric)
-    return balance
+    return balance, card_balance
 
 
 def exchange_awards(
@@ -456,7 +468,7 @@ def exchange_awards(
 
     # 逐个兑换
     exchanged_card = 0
-    card_acquired = False  # 是否实际兑换过体验卡（区分"未选体验卡"与"真实0天"）
+    exchange_happened = False  # 是否发生过成功兑换（区分"未发生兑换"与"真实0"）
     exchanged_coin = 0
     skipped = 0
     failed = 0
@@ -546,9 +558,9 @@ def exchange_awards(
             logger.info(
                 "兑换 %s 成功: %d %s", award.award_level_desc, choice.award_num, choice_name
             )
+            exchange_happened = True
             if choice_type == CHOICE_CARD:
                 exchanged_card += choice.award_num
-                card_acquired = True
             else:
                 exchanged_coin += choice.award_num
         else:
@@ -577,7 +589,7 @@ def exchange_awards(
         reading_time=reading_time,
         reading_day=reading_day,
         exchanged_coin=exchanged_coin,
-        exchanged_card=exchanged_card if card_acquired else None,
+        exchanged_card=exchanged_card if exchange_happened else None,
         skipped=skipped,
         failed=failed,
         platform=platform_name,

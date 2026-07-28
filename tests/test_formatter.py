@@ -26,8 +26,9 @@ class TestFormatSuccess:
             keep_reading_days=128,
             exchange_success=True,
             exchanged_coin=2,
-            exchanged_card=0,
+            exchanged_card=1,
             coin_balance=9.92,
+            card_balance=30,
             platform_note="平台：iOS",
         )
         text = format_push_message(msg)
@@ -41,14 +42,14 @@ class TestFormatSuccess:
         assert "连续阅读：128 天" in text
         assert "兑换状态：成功" in text
         assert "赠币：9.92 (+2)" in text
-        assert "体验卡：0 天" in text
+        assert "体验卡：30 天 (+1)" in text
         # 不应有旧格式残留
         assert "执行完成" not in text
         assert "执行失败" not in text
         assert "书币钱包" not in text
 
     def test_success_without_optional_fields(self) -> None:
-        """余额与体验卡均未获取时显示"未知"。"""
+        """余额与体验卡剩余均未获取：赠币"未知 (+N)"，体验卡"未知"。"""
         msg = PushMessage(
             account="12345",
             reading_success=True,
@@ -56,7 +57,8 @@ class TestFormatSuccess:
             weekly_read_seconds=3600,
             exchange_success=True,
             exchanged_coin=1,
-            exchanged_card=None,
+            exchanged_card=0,  # 发生了兑换但未获得体验卡
+            # card_balance 未设（None）→ 体验卡显示"未知"
         )
         text = format_push_message(msg)
 
@@ -67,23 +69,41 @@ class TestFormatSuccess:
         # coin_balance 未设置（未获取到余额）时显示"未知 (+本次获得)"
         assert "赠币：未知 (+1)" in text
         assert "0.00" not in text
-        # exchanged_card=None（未兑换体验卡）时显示"未知"
+        # card_balance 未获取，体验卡显示"未知"
         assert "体验卡：未知" in text
         assert "连续阅读" not in text
 
-    def test_card_days_displayed_when_present(self) -> None:
-        """体验卡有值时显示具体天数，不显示"未知"。"""
+    def test_no_exchange_data_shows_unknown(self) -> None:
+        """未发生兑换（exchanged_card=None）：赠币与体验卡均显示"未知"。"""
         msg = PushMessage(
             account="12345",
             reading_success=True,
             read_minutes=60,
             exchange_success=True,
             exchanged_coin=0,
-            exchanged_card=3,
-            coin_balance=9.92,
+            exchanged_card=None,  # 未发生兑换
+            coin_balance=None,  # 余额也未查到
         )
         text = format_push_message(msg)
-        assert "体验卡：3 天" in text
+        assert "赠币：未知" in text
+        assert "体验卡：未知" in text
+        assert "0.00" not in text
+        assert "0 天" not in text
+
+    def test_card_days_displayed_when_present(self) -> None:
+        """体验卡剩余天数有值时显示具体天数（+本次获得），不显示"未知"。"""
+        msg = PushMessage(
+            account="12345",
+            reading_success=True,
+            read_minutes=60,
+            exchange_success=True,
+            exchanged_coin=0,
+            exchanged_card=1,  # 本次获得 1 天
+            coin_balance=9.92,
+            card_balance=3,  # 当前剩余 3 天
+        )
+        text = format_push_message(msg)
+        assert "体验卡：3 天 (+1)" in text
         assert "体验卡：未知" not in text
         assert "赠币：9.92" in text
 

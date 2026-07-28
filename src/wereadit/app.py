@@ -57,6 +57,15 @@ def main() -> int:
     )
 
     try:
+        # 先刷新 Web wr_skey（保活握手 + 建立 web 上下文），再刷新 App Token。
+        # 失败不终止：read_books 启动时的强制刷新会再试并决定是否熔断。
+        from wereadit.core.reader import refresh_cookie
+
+        try:
+            refresh_cookie(client, cfg)
+        except CookieExpiredError:
+            logger.warning("阅读前 Web 密钥刷新失败，将由阅读循环重试")
+
         # 兑换 Token：阅读前由 /login 重放刷新生成，平台从命中字段名自识别
         refresh_diagnosis = ""
         platform_note = ""
@@ -98,9 +107,11 @@ def main() -> int:
         # 查询当前余额（独立于兑换，无论是否兑换都显示）
         from wereadit.core.exchanger import query_coin_balance
 
-        balance = query_coin_balance(client, cfg)
-        if balance is not None:
-            msg.coin_balance = balance
+        coin_balance, card_balance = query_coin_balance(client, cfg)
+        if coin_balance is not None:
+            msg.coin_balance = coin_balance
+        if card_balance is not None:
+            msg.card_balance = card_balance
 
         # 兑换阅读奖励
         if cfg.weread_access_token:

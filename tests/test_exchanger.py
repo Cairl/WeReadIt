@@ -289,8 +289,8 @@ class TestExchangeAwards:
         assert result.exchanged_coin == 0
         assert result.failed == 0
 
-    def test_coin_only_exchange_returns_none_card(self, mock_client: MagicMock) -> None:
-        """策略选书币（未兑换体验卡）时 exchanged_card 为 None（推送显示"未知"）。"""
+    def test_coin_only_exchange_returns_zero_card(self, mock_client: MagicMock) -> None:
+        """策略选书币（发生兑换但未获得体验卡）时 exchanged_card 为 0（真实值）。"""
         cfg = _make_cfg()  # 默认全选书币
         query_resp = _mock_award_data()
         mock_response = MagicMock()
@@ -300,7 +300,7 @@ class TestExchangeAwards:
 
         result = exchange_awards(mock_client, cfg)
         assert result.exchanged_coin == 2
-        assert result.exchanged_card is None  # 未兑换体验卡
+        assert result.exchanged_card == 0  # 发生了兑换，体验卡获得 0 天（真实值）
 
 
 class TestExchangeTokenRefresh:
@@ -446,17 +446,23 @@ class TestExchangeLogging:
 
 
 class TestQueryCoinBalance:
-    """独立余额查询：POST /web/pay/balance，按平台取 giftBalance/peerBalance。"""
+    """独立查询：POST /web/pay/balance，返回 (coin_balance, card_balance)。
+
+    书币按平台取 giftBalance/peerBalance；体验卡剩余天数取 welfare.expiredTime
+    （秒）转 int(秒 // 86400) 天。
+    """
 
     def test_ios_picks_gift_balance(self, mock_client: MagicMock) -> None:
-        """iOS 平台优先取 giftBalance。"""
+        """iOS 平台优先取 giftBalance；无 welfare 时 card_balance 为 None。"""
         cfg = _make_cfg(app_token="ios_token", app_token_key="skey")
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"giftBalance": 23.92, "peerBalance": 0}
         mock_client.post.return_value = mock_resp
 
-        assert query_coin_balance(mock_client, cfg) == 23.92
+        coin, card = query_coin_balance(mock_client, cfg)
+        assert coin == 23.92
+        assert card is None
 
     def test_android_picks_peer_balance(self, mock_client: MagicMock) -> None:
         """Android 平台优先取 peerBalance。"""
@@ -466,7 +472,8 @@ class TestQueryCoinBalance:
         mock_resp.json.return_value = {"giftBalance": 0, "peerBalance": 15.5}
         mock_client.post.return_value = mock_resp
 
-        assert query_coin_balance(mock_client, cfg) == 15.5
+        coin, card = query_coin_balance(mock_client, cfg)
+        assert coin == 15.5
 
     def test_ios_fallback_to_peer_when_gift_zero(self, mock_client: MagicMock) -> None:
         """iOS giftBalance 为 0 时回退 peerBalance 非零值。"""
@@ -476,21 +483,41 @@ class TestQueryCoinBalance:
         mock_resp.json.return_value = {"giftBalance": 0, "peerBalance": 10.0}
         mock_client.post.return_value = mock_resp
 
-        assert query_coin_balance(mock_client, cfg) == 10.0
+        coin, _ = query_coin_balance(mock_client, cfg)
+        assert coin == 10.0
+
+    def test_card_balance_from_welfare_expired_time(self, mock_client: MagicMock) -> None:
+        """welfare.expiredTime（秒）转体验卡剩余天数（向下取整）。"""
+        cfg = _make_cfg()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "giftBalance": 10.0,
+            "welfare": {"expiredTime": 3 * 86400 + 3600},  # 3 天 1 小时 → 3 天
+        }
+        mock_client.post.return_value = mock_resp
+
+        coin, card = query_coin_balance(mock_client, cfg)
+        assert coin == 10.0
+        assert card == 3
 
     def test_failure_errcode_returns_none(self, mock_client: MagicMock) -> None:
-        """响应含 errcode（非 0）时返回 None。"""
+        """响应含 errcode（非 0）时返回 (None, None)。"""
         cfg = _make_cfg()
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"errcode": -1, "errmsg": "need login"}
         mock_client.post.return_value = mock_resp
 
-        assert query_coin_balance(mock_client, cfg) is None
+        coin, card = query_coin_balance(mock_client, cfg)
+        assert coin is None
+        assert card is None
 
     def test_network_exception_returns_none(self, mock_client: MagicMock) -> None:
-        """请求异常时返回 None，不影响主流程。"""
+        """请求异常时返回 (None, None)，不影响主流程。"""
         cfg = _make_cfg()
         mock_client.post.side_effect = Exception("network error")
 
-        assert query_coin_balance(mock_client, cfg) is None
+        coin, card = query_coin_balance(mock_client, cfg)
+        assert coin is None
+        assert card is None
