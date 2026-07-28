@@ -64,8 +64,10 @@ class TestFormatSuccess:
         assert "本轮阅读：30 分钟" in text
         assert "本周阅读：1 小时" in text
         assert "兑换状态：成功" in text
-        # coin_balance 未设置时默认 0.00，仍有本次兑换数
-        assert "赠币：0.00 (+1)" in text
+        # coin_balance 未设置（接口未返回可识别字段）时只显示本次获得，
+        # 不兜底为 0.00 避免误导用户以为余额是 0
+        assert "赠币：+1" in text
+        assert "0.00" not in text
         assert "体验卡：0 天" in text
         assert "连续阅读" not in text
 

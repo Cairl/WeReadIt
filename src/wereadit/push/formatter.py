@@ -20,6 +20,9 @@
     赠币：9.92 (+2)
     体验卡：0 天
 
+余额未知（接口未返回可识别字段）时只显示本次获得，不兜底为 0.00：
+    赠币：+2
+
 诊断信息追加在末尾，不加区块标题。
 """
 
@@ -136,12 +139,17 @@ def format_push_message(msg: PushMessage) -> str:
             lines.append("兑换未进行")
     elif msg.exchange_success:
         lines.append("兑换状态：成功")
-        # 赠币行：兑换成功时始终展示当前书币余额
-        balance = msg.coin_balance if msg.coin_balance is not None else 0.0
-        balance_str = f"{balance:.2f}"
-        if msg.exchanged_coin > 0:
-            balance_str += f" (+{msg.exchanged_coin})"
-        lines.append(f"赠币：{balance_str}")
+        # 赠币行：有余额时显示"余额 (+本次获得)"；余额未知时只显示本次获得，
+        # 避免提取失败兜底成 0.00 误导用户以为余额是 0
+        if msg.coin_balance is not None:
+            balance_str = f"{msg.coin_balance:.2f}"
+            if msg.exchanged_coin > 0:
+                balance_str += f" (+{msg.exchanged_coin})"
+            lines.append(f"赠币：{balance_str}")
+        elif msg.exchanged_coin > 0:
+            lines.append(f"赠币：+{msg.exchanged_coin}")
+        else:
+            lines.append("赠币：0")
         lines.append(f"体验卡：{msg.exchanged_card} 天")
     elif msg.exchange_skipped and not msg.exchange_error:
         lines.append("兑换状态：未配置")

@@ -60,12 +60,27 @@ _KEEP_READING_KEYS = (
     "totalReadDays",
 )
 # 响应中可能表示"书币钱包余额"的字段名（按优先级尝试）
+# 不放 "coin" / "balance" 这类过于通用的名字，避免误匹配"本次获得数"等字段
 _COIN_BALANCE_KEYS = (
     "bookCoin",
     "bookCoinBalance",
+    "bookCoinNum",
     "walletCoin",
+    "walletCoinBalance",
     "userCoin",
-    "coin",
+    "userCoinBalance",
+    "coinBalance",
+    "remainCoin",
+    "totalCoin",
+)
+# 余额字段可能嵌套在这些子对象里（递归查找，深度限 3 层）
+_COIN_BALANCE_CONTAINERS = (
+    "wallet",
+    "user",
+    "account",
+    "userInfo",
+    "walletInfo",
+    "userWallet",
 )
 
 
@@ -188,17 +203,57 @@ def _extract_keep_reading_days(award_data: dict[str, Any]) -> int | None:
     return None
 
 
-def _extract_coin_balance(award_data: dict[str, Any]) -> float | None:
-    """从容错字段名列表中提取书币钱包余额，未找到返回 None。
+def _collect_coin_balance_candidates(
+    award_data: dict[str, Any], depth: int = 0
+) -> list[float]:
+    """递归收集所有疑似书币余额字段的值。
 
-    微信读书书币余额可能以整数（书币数）或小数（元）形式返回，统一转 float。
-    余额为 0 时也返回 0.0（而非 None），确保推送时能展示当前书币。
+    返回当前层 + 嵌套容器层中所有匹配 _COIN_BALANCE_KEYS 且为非负数值的字段值，
+    顺序为：当前层候选 -> 各嵌套容器候选（深度优先）。
     """
+    if depth > 3:
+        return []
+    found: list[float] = []
     for key in _COIN_BALANCE_KEYS:
         value = award_data.get(key)
-        if isinstance(value, int | float) and value >= 0:
-            return float(value)
-    return None
+        if (
+            isinstance(value, int | float)
+            and not isinstance(value, bool)
+            and value >= 0
+        ):
+            found.append(float(value))
+    for container_key in _COIN_BALANCE_CONTAINERS:
+        container = award_data.get(container_key)
+        if isinstance(container, dict):
+            found.extend(_collect_coin_balance_candidates(container, depth + 1))
+    return found
+
+
+def _extract_coin_balance(
+    award_data: dict[str, Any], depth: int = 0
+) -> float | None:
+    """从容错字段名列表中提取书币钱包余额，支持递归查找嵌套对象，未找到返回 None。
+
+    微信读书书币余额可能以整数（书币数）或小数（元）形式返回，统一转 float。
+
+    选择策略：收集所有候选值，优先返回非零值；全部候选为 0 时返回 0.0；
+    无任何候选字段返回 None。
+
+    偏好非零值的原因：响应中可能同时存在"本次获得书币数"（值常为 0 或 2）
+    与"钱包余额"两个同义字段，按固定顺序取首个会把 0 误当余额，导致推送显示
+    "赠币：0.00"误导用户以为余额清零。优先非零值能避开"本次获得=0"冒充余额的
+    情况；余额确为 0 时仍返回 0.0，不影响展示。
+
+    递归深度限制 3 层：余额字段可能嵌套在 wallet/user/account 等子对象里，
+    但过深遍历既无必要也容易误匹配。
+    """
+    candidates = _collect_coin_balance_candidates(award_data, depth)
+    if not candidates:
+        return None
+    for value in candidates:
+        if value > 0:
+            return value
+    return 0.0
 
 
 def exchange_awards(
@@ -277,6 +332,31 @@ def exchange_awards(
     reading_day = award_data.get("readingDay", 0)
     keep_reading_days = _extract_keep_reading_days(award_data)
     coin_balance = _extract_coin_balance(award_data)
+    # 排查余额字段名：记录查询响应顶层字段 + 数值类型字段，
+    # 便于在 _extract_coin_balance 返回 None 时从日志定位实际字段名
+    logger.debug("查询奖励响应顶层字段: %s", list(award_data.keys()))
+    _numeric_fields = {
+        k: v
+        for k, v in award_data.items()
+        if isinstance(v, int | float) and not isinstance(v, bool)
+    }
+    logger.debug("查询响应数值字段: %s", _numeric_fields)
+    if coin_balance is None:
+        logger.warning(
+            "未能从查询响应中识别书币余额字段（已尝试 %s + 嵌套容器 %s），"
+            "推送将不显示余额；请用上述 DEBUG 日志确认实际字段名",
+            _COIN_BALANCE_KEYS, _COIN_BALANCE_CONTAINERS,
+        )
+    elif coin_balance == 0.0:
+        # 解析为 0 可能是"本次获得书币数"等 0 值字段冒充余额（真实余额非 0），
+        # 也可能余额确为 0。发 WARNING 引导核对 DEBUG 数值字段，确认是否需要
+        # 把真实余额字段名补进 _COIN_BALANCE_KEYS。
+        logger.warning(
+            "查询响应书币余额识别为 0.0（候选字段均为 0 值）；若与实际余额不符，"
+            "请检查 DEBUG 日志中数值字段，可能真实余额字段名不在候选列表",
+        )
+    else:
+        logger.debug("查询响应识别到书币余额: %s", coin_balance)
     raw_awards = award_data.get("readtimeAwards", []) + award_data.get("readdayAwards", [])
     awards = [Award.from_dict(a) for a in raw_awards]
 
@@ -325,10 +405,26 @@ def exchange_awards(
                     "pf": _get_pf(cfg.weread_platform),
                     "awardChoiceType": choice_type,
                 }
-                _call_exchange(
+                exchange_resp = _call_exchange(
                     client, auth_token, vid, cfg.weread_platform, exchange_body
                 )
                 success = True
+                # 兑换响应可能带最新余额（兑换后），提取到则覆盖查询时的旧余额
+                new_balance = _extract_coin_balance(exchange_resp)
+                if new_balance is not None:
+                    # 兑换响应余额为 0 时不覆盖查询时的非零余额：
+                    # 兑换接口响应结构与查询可能不同，0 可能来自"本次获得书币数"
+                    # 等同义字段误匹配，而非真实余额清零（兑换只会让余额增加或不变）。
+                    # 避免查询时正确的 23.92 被兑换响应的 0 误覆盖成 0.00。
+                    if new_balance > 0 or coin_balance in (None, 0.0):
+                        coin_balance = new_balance
+                        logger.debug(
+                            "兑换响应识别到最新书币余额: %s", new_balance
+                        )
+                    else:
+                        logger.debug(
+                            "兑换响应余额候选为 0，保留查询时余额: %s", coin_balance
+                        )
                 break
             except ExchangeError as exc:
                 if exc.errcode == ERRCODE_TOKEN_EXPIRED:

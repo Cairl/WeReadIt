@@ -219,6 +219,50 @@ class TestExchangeAwards:
         result = exchange_awards(mock_client, cfg)
         assert result.coin_balance == 0.0
 
+    def test_coin_balance_prefers_nonzero_over_zero_field(
+        self, mock_client: MagicMock
+    ) -> None:
+        """响应中同时存在 0 值字段（如"本次获得"）与非零余额字段时，应返回非零余额。
+
+        回归 2026-07-28 推送显示"赠币：0.00 (+2)"而真实余额 23.92 的问题：
+        原实现按字段名顺序取首个 >= 0 的值即返回，命中 0 值字段就错过真实余额。
+        """
+        cfg = _make_cfg()
+        query_resp = _mock_award_data()
+        query_resp["bookCoin"] = 0  # 同义字段误匹配（如"本次获得书币数"）
+        query_resp["bookCoinBalance"] = 23.92  # 真实钱包余额
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = query_resp
+        mock_client.post.return_value = mock_response
+
+        result = exchange_awards(mock_client, cfg)
+        assert result.coin_balance == 23.92
+
+    def test_exchange_response_zero_not_overwrite_nonzero_balance(
+        self, mock_client: MagicMock
+    ) -> None:
+        """兑换响应余额为 0 时不覆盖查询时的非零余额。
+
+        回归 2026-07-28 推送问题：兑换接口响应结构与查询不同，0 可能来自
+        "本次获得书币数"等同义字段误匹配，不应把查询时正确的 23.92 覆盖成 0.0。
+        """
+        cfg = _make_cfg()
+        query_resp = _mock_award_data()
+        query_resp["bookCoin"] = 23.92  # 查询时正确余额
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        # 查询返回 23.92；2 次兑换响应均带 bookCoin=0（误匹配字段）
+        mock_response.json.side_effect = [
+            query_resp,
+            {"bookCoin": 0},
+            {"bookCoin": 0},
+        ]
+        mock_client.post.return_value = mock_response
+
+        result = exchange_awards(mock_client, cfg)
+        assert result.coin_balance == 23.92
+
     def test_optional_fields_none_when_absent(self, mock_client: MagicMock) -> None:
         """响应中无连续阅读/书币字段时，对应字段为 None。"""
         cfg = _make_cfg()
