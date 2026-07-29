@@ -17,16 +17,16 @@
     连续阅读：128 天
 
     兑换状态：成功
-    书币余额：9.92 (+2)
-    体验卡：42 小时 40 分钟 (+1)
+    书币余额：9.92 (+2 书币)
+    体验卡：1 天 18 小时 40 分钟 (+1 天)
 
 书币余额在兑换之后查询，已含本次兑换所得，与 App「我-账户」顶部书币
-数字一致（含赠币；赠币无独立实时总额接口）。(+N) 为本次兑换所得。
+数字一致（含赠币；赠币无独立实时总额接口）。(+N 书币) 为本次兑换所得。
 余额未知（接口未返回可识别字段）时只显示本次获得，不兜底为 0.00：
-    书币余额：+2
+    书币余额：+2 书币
 
 体验卡显示剩余时长，格式与「本周阅读」一致（_format_duration：
-X 小时 Y 分钟）；本次兑换获得体验卡时附 (+N)。
+X 天 Y 小时 Z 分钟）；本次兑换获得体验卡时附 (+N 天)。
 
 诊断信息追加在末尾，不加区块标题。
 """
@@ -81,19 +81,24 @@ class PushMessage:
 
 
 def _format_duration(seconds: int) -> str:
-    """把秒数格式化为 'X 小时 Y 分钟'。
+    """把秒数格式化为 'X 天 Y 小时 Z 分钟'。
 
-    0 或负数返回 '0 分钟'；不足 1 小时只显示分钟。
+    0 或负数返回 '0 分钟'；不足 1 天只显示小时/分钟；不足 1 小时只显示分钟。
+    任一单位为 0 则省略（如 2 天 30 分钟，不写 0 小时）。
     """
     if seconds <= 0:
         return "0 分钟"
-    hours = seconds // 3600
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
     minutes = (seconds % 3600) // 60
-    if hours > 0 and minutes > 0:
-        return f"{hours} 小时 {minutes} 分钟"
+    parts: list[str] = []
+    if days > 0:
+        parts.append(f"{days} 天")
     if hours > 0:
-        return f"{hours} 小时"
-    return f"{minutes} 分钟"
+        parts.append(f"{hours} 小时")
+    if minutes > 0:
+        parts.append(f"{minutes} 分钟")
+    return " ".join(parts) if parts else "0 分钟"
 
 
 def format_push_message(msg: PushMessage) -> str:
@@ -155,18 +160,18 @@ def format_push_message(msg: PushMessage) -> str:
         if msg.coin_balance is not None:
             balance_str = f"{msg.coin_balance:.2f}"
             if msg.exchanged_coin > 0:
-                balance_str += f" (+{msg.exchanged_coin})"
+                balance_str += f" (+{msg.exchanged_coin} 书币)"
             lines.append(f"书币余额：{balance_str}")
         elif msg.exchanged_coin > 0:
-            lines.append(f"书币余额：未知 (+{msg.exchanged_coin})")
+            lines.append(f"书币余额：未知 (+{msg.exchanged_coin} 书币)")
         else:
             lines.append("书币余额：未知")
         # 体验卡：剩余时长，格式与「本周阅读」一致（_format_duration）；
-        # 未获取显示"未知"；本次兑换获得体验卡时附 (+N)
+        # 未获取显示"未知"；本次兑换获得体验卡时附 (+N 天)
         if msg.card_remain_seconds is not None:
             card_str = _format_duration(int(msg.card_remain_seconds))
             if msg.exchanged_card is not None and msg.exchanged_card > 0:
-                card_str += f" (+{msg.exchanged_card})"
+                card_str += f" (+{msg.exchanged_card} 天)"
             lines.append(f"体验卡：{card_str}")
         else:
             lines.append("体验卡：未知")

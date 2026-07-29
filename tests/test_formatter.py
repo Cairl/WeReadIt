@@ -28,7 +28,7 @@ class TestFormatSuccess:
             exchanged_coin=2,
             exchanged_card=1,
             coin_balance=9.92,
-            card_remain_seconds=9000,  # 2 小时 30 分钟
+            card_remain_seconds=153600,  # 1 天 18 小时 40 分钟
             platform_note="平台：iOS",
         )
         text = format_push_message(msg)
@@ -41,9 +41,9 @@ class TestFormatSuccess:
         assert "本周阅读：7 小时 31 分钟" in text
         assert "连续阅读：128 天" in text
         assert "兑换状态：成功" in text
-        assert "书币余额：9.92 (+2)" in text
-        # 体验卡剩余时长，格式与「本周阅读」一致
-        assert "体验卡：2 小时 30 分钟 (+1)" in text
+        assert "书币余额：9.92 (+2 书币)" in text
+        # 体验卡剩余时长带天，括号加数带单位
+        assert "体验卡：1 天 18 小时 40 分钟 (+1 天)" in text
         assert "约" not in text
         assert "到期" not in text
         # 不应有旧格式残留
@@ -70,8 +70,8 @@ class TestFormatSuccess:
         assert "本轮阅读：30 分钟" in text
         assert "本周阅读：1 小时" in text
         assert "兑换状态：成功" in text
-        # coin_balance 未设置（未获取到余额）时显示"未知 (+本次获得)"
-        assert "书币余额：未知 (+1)" in text
+        # coin_balance 未设置（未获取到余额）时显示"未知 (+本次获得 书币)"
+        assert "书币余额：未知 (+1 书币)" in text
         assert "0.00" not in text
         # card_remain_seconds 未获取，体验卡显示"未知"
         assert "体验卡：未知" in text
@@ -95,7 +95,7 @@ class TestFormatSuccess:
         assert "到期" not in text
 
     def test_card_duration_displayed_when_present(self) -> None:
-        """体验卡有剩余秒数时按时长格式显示（+本次获得），不显示"未知"。"""
+        """体验卡有剩余秒数时按时长格式显示（+本次获得 天），不显示"未知"。"""
         msg = PushMessage(
             account="12345",
             reading_success=True,
@@ -104,10 +104,10 @@ class TestFormatSuccess:
             exchanged_coin=0,
             exchanged_card=1,  # 本次获得 1 天
             coin_balance=9.92,
-            card_remain_seconds=9000,  # 2 小时 30 分钟
+            card_remain_seconds=153600,  # 1 天 18 小时 40 分钟
         )
         text = format_push_message(msg)
-        assert "体验卡：2 小时 30 分钟 (+1)" in text
+        assert "体验卡：1 天 18 小时 40 分钟 (+1 天)" in text
         assert "体验卡：未知" not in text
         assert "约" not in text
         assert "到期" not in text
