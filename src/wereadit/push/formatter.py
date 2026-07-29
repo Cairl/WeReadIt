@@ -18,15 +18,15 @@
 
     兑换状态：成功
     书币余额：9.92 (+2)
-    体验卡：2026-07-31 23:59:59 (+1)
+    体验卡：42 小时 40 分钟 (+1)
 
 书币余额在兑换之后查询，已含本次兑换所得，与 App「我-账户」顶部书币
 数字一致（含赠币；赠币无独立实时总额接口）。(+N) 为本次兑换所得。
 余额未知（接口未返回可识别字段）时只显示本次获得，不兜底为 0.00：
     书币余额：+2
 
-体验卡只显示到期日期（北京时间，格式与推送顶部时间戳一致）；本次兑换
-获得体验卡时附 (+N)。仅拿到剩余秒数、无到期时间戳时退化为"约 X.Y 天"。
+体验卡显示剩余时长，格式与「本周阅读」一致（_format_duration：
+X 小时 Y 分钟）；本次兑换获得体验卡时附 (+N)。
 
 诊断信息追加在末尾，不加区块标题。
 """
@@ -161,18 +161,10 @@ def format_push_message(msg: PushMessage) -> str:
             lines.append(f"书币余额：未知 (+{msg.exchanged_coin})")
         else:
             lines.append("书币余额：未知")
-        # 体验卡：只显示到期日期（北京时间，格式与推送顶部时间戳一致）；
-        # 仅拿到剩余秒数无到期时间戳时退化为"约 X.Y 天"；未获取显示"未知"。
-        # 本次兑换获得体验卡时附 (+N)，与书币余额行格式一致
-        if msg.card_expire_ts is not None:
-            card_str = datetime.fromtimestamp(
-                msg.card_expire_ts, _BEIJING_TZ
-            ).strftime("%Y-%m-%d %H:%M:%S")
-            if msg.exchanged_card is not None and msg.exchanged_card > 0:
-                card_str += f" (+{msg.exchanged_card})"
-            lines.append(f"体验卡：{card_str}")
-        elif msg.card_remain_seconds is not None:
-            card_str = f"约 {msg.card_remain_seconds / 86400:.1f} 天"
+        # 体验卡：剩余时长，格式与「本周阅读」一致（_format_duration）；
+        # 未获取显示"未知"；本次兑换获得体验卡时附 (+N)
+        if msg.card_remain_seconds is not None:
+            card_str = _format_duration(int(msg.card_remain_seconds))
             if msg.exchanged_card is not None and msg.exchanged_card > 0:
                 card_str += f" (+{msg.exchanged_card})"
             lines.append(f"体验卡：{card_str}")
