@@ -58,6 +58,42 @@ def _check_app_curl(cfg: Config) -> tuple[bool, str]:
     )
 
 
+def _probe_balance(cfg: Config) -> tuple[bool, str]:
+    """余额来源探测（只读信息项，不影响退出码）。
+
+    背景：/web/pay/balance 的 giftBalance 系字段实测为静态值，不等于
+    App 内实时赠币余额。本探测对候选接口发只读请求并全量拍平数值字段，
+    供在日志中定位真实余额字段（详见 core/balance_probe.py 模块 docstring）。
+    """
+    if not cfg.cookies.get("wr_vid"):
+        return True, "[信息] 余额探测：跳过（cookie 无 wr_vid）"
+
+    app_token = ""
+    platform = ""
+    if cfg.weread_app_curl:
+        from wereadit.core.token_refresher import refresh_app_token
+
+        result = refresh_app_token(cfg.weread_app_curl)
+        if result.ok:
+            app_token = result.token or ""
+            platform = "ios" if result.token_key == "skey" else "android"
+
+    from wereadit.core.balance_probe import probe_balance_sources
+
+    client = HttpClient(headers=cfg.headers, cookies=cfg.cookies)
+    try:
+        report = probe_balance_sources(
+            client, cfg, app_token=app_token, platform=platform
+        )
+    except Exception as exc:  # noqa: BLE001 - 探测失败不影响配置检查主流程
+        logger.warning("余额探测异常: %s", exc)
+        return True, f"[信息] 余额探测：执行异常 {exc!r}"
+    finally:
+        client.close()
+    # 报告本体已写 INFO 日志；推送里放完整报告（私密渠道，便于手机查看）
+    return True, f"[信息] {report}"
+
+
 def main() -> int:
     """配置检查入口。返回 0（全部正常）或 1（任一异常）。"""
     setup_logging()
@@ -71,6 +107,7 @@ def main() -> int:
             f"[信息] READ_NUM={cfg.read_num}（约 {cfg.read_num // 2} 分钟），"
             f"EXCHANGE_AWARD={cfg.exchange_award}",
         ),
+        _probe_balance(cfg),
     ]
 
     lines = [line for _, line in results]
