@@ -85,6 +85,32 @@ def _probe_balance(cfg: Config) -> tuple[bool, str]:
         report = probe_balance_sources(
             client, cfg, app_token=app_token, platform=platform
         )
+        # 端到端验证生产查询函数（与每日任务同一代码路径；探测已续期 cookie）。
+        # 平台由 /login 重放命中字段名派生，与 app.py 注入逻辑一致。
+        import dataclasses
+        from datetime import datetime, timedelta, timezone
+
+        from wereadit.core.exchanger import query_coin_balance
+
+        verify_cfg = cfg
+        if app_token:
+            verify_cfg = dataclasses.replace(
+                cfg,
+                app_token=app_token,
+                app_token_key="skey" if platform == "ios" else "accessToken",
+            )
+        coin, card_secs, card_ts = query_coin_balance(client, verify_cfg)
+        expire_str = ""
+        if card_ts:
+            expire_str = datetime.fromtimestamp(
+                card_ts, timezone(timedelta(hours=8))
+            ).strftime("%m-%d %H:%M")
+        card_str = (
+            f"约 {card_secs / 86400:.1f} 天（{expire_str} 到期）"
+            if card_secs is not None
+            else "未知"
+        )
+        report += f"\n[验证] query_coin_balance: 书币余额={coin}, 体验卡={card_str}"
     except Exception as exc:  # noqa: BLE001 - 探测失败不影响配置检查主流程
         logger.warning("余额探测异常: %s", exc)
         return True, f"[信息] 余额探测：执行异常 {exc!r}"
