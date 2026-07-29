@@ -7,6 +7,12 @@ giftBalance/peerBalance 当作"赠币余额"推送，实测该值长期不随兑
 数值字段按点分路径拍平输出，在 Actions 日志中一次性定位真实字段，
 不猜、不编、不拿 mock 值冒充真实命中。
 
+探测前置条件（与每日任务运行时状态对齐）：
+- web 端：先 refresh_cookie 续期 wr_skey（Secret 里的抓包 cookie 对 pay
+  接口已过期，每日任务靠 login/renewal 续期后才能访问）
+- App 端：用 /login 重放的新鲜 token + exchanger._build_headers 完整请求头
+  （简化头会 401，版本号等字段不全会被拒绝）
+
 安全约束：
 - 只输出键名与数值；字符串值（token/昵称/头像/签名等）一律不输出。
 - 全部请求只读（GET 或查询型 POST），不产生兑换/阅读等副作用。
@@ -22,8 +28,8 @@ from wereadit.constants import (
     BALANCE_URL,
     EXCHANGE_TIMEOUT,
     EXCHANGE_URL,
-    PLATFORM_IOS,
 )
+from wereadit.core.exchanger import _build_headers, _get_pf
 
 if TYPE_CHECKING:
     from wereadit.config import Config
@@ -35,19 +41,6 @@ logger = logging.getLogger(__name__)
 _MAX_DEPTH = 5
 # 单响应最多输出的数值字段条数（防日志刷屏）
 _MAX_FIELDS = 60
-
-# App 端探测用的平台请求头（与 exchanger._build_headers 同构，探测独立实现，
-# 避免诊断工具反向依赖业务实现，业务重构时探测不受影响）
-_IOS_APP_HEADERS = {
-    "channelid": "AppStore",
-    "v": "9.0.0",
-    "User-Agent": "WeRead/9.0.0 (iPhone; iOS 17.0; Scale/3.00)",
-}
-_ANDROID_APP_HEADERS = {
-    "baseapi": "32",
-    "appver": "9.0.0",
-    "User-Agent": "WeRead/9.0.0 WRBrand/huawei Dalvik/2.1.0",
-}
 
 
 def _flatten_numbers(
@@ -89,8 +82,11 @@ def _top_keys(data: Any) -> str:
 def _format_probe_result(name: str, status: int, data: Any) -> list[str]:
     """格式化单个接口的探测结果。"""
     lines = [f"  {name}: HTTP {status}"]
-    if isinstance(data, dict) and data.get("errcode") not in (None, 0):
-        lines.append(f"    errcode={data.get('errcode')}, errmsg={data.get('errmsg')}")
+    if isinstance(data, dict):
+        errcode = data.get("errcode", data.get("errCode"))
+        if errcode not in (None, 0):
+            errmsg = data.get("errmsg", data.get("errMsg"))
+            lines.append(f"    errcode={errcode}, errmsg={errmsg}")
     numbers: dict[str, float] = {}
     _flatten_numbers(data, "", 0, numbers)
     if numbers:
@@ -128,13 +124,6 @@ def _probe_one(
     return _format_probe_result(name, resp.status_code, data)
 
 
-def _build_app_probe_headers(token: str, vid: str, platform: str) -> dict[str, str]:
-    """构造 App 端探测请求头（token 按平台放 skey 或 accessToken）。"""
-    if platform == PLATFORM_IOS:
-        return {**_IOS_APP_HEADERS, "skey": token, "vid": str(vid)}
-    return {**_ANDROID_APP_HEADERS, "accessToken": token, "vid": str(vid)}
-
-
 def probe_balance_sources(
     client: HttpClient,
     cfg: Config,
@@ -145,10 +134,10 @@ def probe_balance_sources(
     """对候选余额接口逐一探测，返回人话报告（同时写 INFO 日志）。
 
     Args:
-        client: 带 web cookie 的 HTTP 客户端（web 端接口认证用）
-        cfg: 运行时配置（取 wr_vid）
+        client: 带 web cookie 的 HTTP 客户端（函数内会先 refresh_cookie 续期）
+        cfg: 运行时配置（取 wr_vid 与平台）
         app_token: 可选，/login 重放得到的新鲜 App token；为空则跳过 App 端探测
-        platform: ios / android，决定 App 端 token 放哪个 header
+        platform: ios / android，决定 App 端请求头形态
 
     Returns:
         多行报告文本；任何单点失败都体现在报告里，不抛异常。
@@ -156,8 +145,16 @@ def probe_balance_sources(
     vid = cfg.cookies.get("wr_vid", "")
     lines: list[str] = ["余额来源探测（只读，数值字段全量拍平）:"]
 
-    # ---- web 端（cookie 认证）----
+    # ---- web 端（先续期 wr_skey，与每日任务运行时状态对齐）----
     lines.append("[web 端]")
+    try:
+        from wereadit.core.reader import refresh_cookie
+
+        refresh_cookie(client, cfg, announce=False)
+        lines.append("  (wr_skey 已续期)")
+    except Exception as exc:  # noqa: BLE001 - 续期失败仍继续探测，结果里体现
+        lines.append(f"  (wr_skey 续期失败: {exc!r}，以下用原始 cookie 探测)")
+
     lines.extend(
         _probe_one(
             client,
@@ -170,30 +167,31 @@ def probe_balance_sources(
     lines.extend(
         _probe_one(
             client,
-            "web/user",
+            "web/pay/memberCardSummary",
             "GET",
-            f"https://weread.qq.com/web/user?userVid={vid}",
+            "https://weread.qq.com/web/pay/memberCardSummary?pf=ios",
         )
     )
     lines.extend(
         _probe_one(
             client,
-            "web/pay/memberCardSummary",
+            "web/user",
             "GET",
-            "https://weread.qq.com/web/pay/memberCardSummary",
+            f"https://weread.qq.com/web/user?userVid={vid}",
         )
     )
 
-    # ---- App 端（header token 认证，需要新鲜 token）----
-    if app_token:
-        app_headers = _build_app_probe_headers(app_token, vid, platform)
+    # ---- App 端（/login 重放的新鲜 token + 完整平台请求头）----
+    if app_token and platform:
+        app_headers = _build_headers(app_token, vid, platform)
+        pf = _get_pf(platform)
         lines.append("[App 端]")
         lines.extend(
             _probe_one(
                 client,
-                "i/user/profile",
+                "i/pay/memberCardSummary",
                 "GET",
-                "https://i.weread.qq.com/user/profile",
+                f"https://i.weread.qq.com/pay/memberCardSummary?pf={pf}",
                 headers=app_headers,
             )
         )
@@ -209,18 +207,18 @@ def probe_balance_sources(
         lines.extend(
             _probe_one(
                 client,
-                "i/pay/memberCardSummary",
+                "i/reader/welfareCoin",
                 "GET",
-                "https://i.weread.qq.com/pay/memberCardSummary",
+                "https://i.weread.qq.com/reader/welfareCoin",
                 headers=app_headers,
             )
         )
         lines.extend(
             _probe_one(
                 client,
-                "i/reader/welfareCoin",
+                "i/user/profile",
                 "GET",
-                "https://i.weread.qq.com/reader/welfareCoin",
+                "https://i.weread.qq.com/user/profile",
                 headers=app_headers,
             )
         )
@@ -238,7 +236,7 @@ def probe_balance_sources(
                     "isExchangeAward": 0,
                     "isVisitReadGoal": 1,
                     "unread": 0,
-                    "pf": "iOS" if platform == PLATFORM_IOS else "android",
+                    "pf": pf,
                     "awardChoiceType": 0,
                 },
             )
