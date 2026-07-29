@@ -17,13 +17,13 @@
     连续阅读：128 天
 
     兑换状态：成功
-    书币余额：9.92 (+2 书币)
+    书币余额：9.92 (+2)
     体验卡：1 天 18 小时 40 分钟 (+1 天)
 
 书币余额在兑换之后查询，已含本次兑换所得，与 App「我-账户」顶部书币
-数字一致（含赠币；赠币无独立实时总额接口）。(+N 书币) 为本次兑换所得。
+数字一致（含赠币；赠币无独立实时总额接口）。(+N) 为本次兑换所得。
 余额未知（接口未返回可识别字段）时只显示本次获得，不兜底为 0.00：
-    书币余额：+2 书币
+    书币余额：+2
 
 体验卡显示剩余时长，格式与「本周阅读」一致（_format_duration：
 X 天 Y 小时 Z 分钟）；本次兑换获得体验卡时附 (+N 天)。
@@ -160,10 +160,10 @@ def format_push_message(msg: PushMessage) -> str:
         if msg.coin_balance is not None:
             balance_str = f"{msg.coin_balance:.2f}"
             if msg.exchanged_coin > 0:
-                balance_str += f" (+{msg.exchanged_coin} 书币)"
+                balance_str += f" (+{msg.exchanged_coin})"
             lines.append(f"书币余额：{balance_str}")
         elif msg.exchanged_coin > 0:
-            lines.append(f"书币余额：未知 (+{msg.exchanged_coin} 书币)")
+            lines.append(f"书币余额：未知 (+{msg.exchanged_coin})")
         else:
             lines.append("书币余额：未知")
         # 体验卡：剩余时长，格式与「本周阅读」一致（_format_duration）；
