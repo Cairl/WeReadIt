@@ -29,7 +29,7 @@ class TestFormatSuccess:
             exchanged_card=1,
             coin_balance=9.92,
             card_remain_seconds=1.8 * 86400,  # 约 1.8 天
-            card_expire_ts=1785513599,  # 固定时间戳，到期时间按北京时间渲染
+            card_expire_ts=1785513599,  # 北京时间 2026-07-31 23:59:59
             platform_note="平台：iOS",
         )
         text = format_push_message(msg)
@@ -43,9 +43,10 @@ class TestFormatSuccess:
         assert "连续阅读：128 天" in text
         assert "兑换状态：成功" in text
         assert "书币余额：9.92 (+2)" in text
-        assert "体验卡：约 1.8 天" in text
-        assert "到期" in text
-        assert "(+1)" in text
+        # 体验卡只显示到期日期（与顶部时间戳同格式），不带"约 X.Y 天"与"到期"括号
+        assert "体验卡：2026-07-31 23:59:59 (+1)" in text
+        assert "约" not in text
+        assert "到期" not in text
         # 不应有旧格式残留
         assert "执行完成" not in text
         assert "执行失败" not in text
@@ -94,8 +95,8 @@ class TestFormatSuccess:
         assert "0.00" not in text
         assert "到期" not in text
 
-    def test_card_days_displayed_when_present(self) -> None:
-        """体验卡剩余有值时显示精确天数（+本次获得），不显示"未知"。"""
+    def test_card_expiry_displayed_when_present(self) -> None:
+        """体验卡有到期时间戳时显示到期日期（+本次获得），不显示"未知"/"约"。"""
         msg = PushMessage(
             account="12345",
             reading_success=True,
@@ -104,13 +105,29 @@ class TestFormatSuccess:
             exchanged_coin=0,
             exchanged_card=1,  # 本次获得 1 天
             coin_balance=9.92,
-            card_remain_seconds=3 * 86400,  # 剩余 3 天（无到期时间戳时不渲染到期）
+            card_expire_ts=1785513599,  # 北京时间 2026-07-31 23:59:59
+        )
+        text = format_push_message(msg)
+        assert "体验卡：2026-07-31 23:59:59 (+1)" in text
+        assert "体验卡：未知" not in text
+        assert "约" not in text
+        assert "书币余额：9.92" in text
+
+    def test_card_seconds_only_fallback(self) -> None:
+        """仅有剩余秒数、无到期时间戳时退化为"约 X.Y 天"。"""
+        msg = PushMessage(
+            account="12345",
+            reading_success=True,
+            read_minutes=60,
+            exchange_success=True,
+            exchanged_coin=0,
+            exchanged_card=1,  # 本次获得 1 天
+            coin_balance=9.92,
+            card_remain_seconds=3 * 86400,  # 剩余 3 天，无到期时间戳
         )
         text = format_push_message(msg)
         assert "体验卡：约 3.0 天 (+1)" in text
-        assert "体验卡：未知" not in text
         assert "到期" not in text
-        assert "书币余额：9.92" in text
 
     def test_minimal_success(self) -> None:
         """阅读成功，兑换跳过（未配置）"""
