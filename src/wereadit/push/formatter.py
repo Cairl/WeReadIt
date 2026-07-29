@@ -18,15 +18,15 @@
 
     兑换状态：成功
     赠币数量：9.92 (+2)
-    体验天数：1 天 18 小时 40 分钟 (+1 天)
+    体验时间：1 天 18 小时 (+1 天)
 
 赠币在兑换之后查询，已含本次兑换所得，与 App「我-账户」顶部书币
 数字一致（含赠币；赠币无独立实时总额接口）。(+N) 为本次兑换所得。
 余额未知（接口未返回可识别字段）时只显示本次获得，不兜底为 0.00：
     赠币：+2
 
-体验卡显示剩余时长，格式与「本周阅读」一致（_format_duration：
-X 天 Y 小时 Z 分钟）；本次兑换获得体验卡时附 (+N 天)。
+体验时间显示剩余时长，精确到小时（_format_duration_hours：
+X 天 Y 小时）；本次兑换获得体验卡时附 (+N 天)。
 
 诊断信息追加在末尾，不加区块标题。
 """
@@ -101,6 +101,23 @@ def _format_duration(seconds: int) -> str:
     return " ".join(parts) if parts else "0 分钟"
 
 
+def _format_duration_hours(seconds: int) -> str:
+    """把秒数格式化为 'X 天 Y 小时'，不显示分钟。
+
+    用于体验时间展示：精确到小时即可，分钟级精度对会员卡剩余时长无意义。
+    """
+    if seconds <= 0:
+        return "0 小时"
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    parts: list[str] = []
+    if days > 0:
+        parts.append(f"{days} 天")
+    if hours > 0:
+        parts.append(f"{hours} 小时")
+    return " ".join(parts) if parts else "0 小时"
+
+
 def format_push_message(msg: PushMessage) -> str:
     """渲染推送消息为最终文本。
 
@@ -166,15 +183,15 @@ def format_push_message(msg: PushMessage) -> str:
             lines.append(f"赠币数量：未知 (+{msg.exchanged_coin})")
         else:
             lines.append("赠币数量：未知")
-        # 体验卡：剩余时长，格式与「本周阅读」一致（_format_duration）；
-        # 未获取显示"未知"；本次兑换获得体验卡时附 (+N 天)
+        # 体验时间：剩余时长精确到小时；未获取显示"未知"；
+        # 本次兑换获得体验卡时附 (+N 天)
         if msg.card_remain_seconds is not None:
-            card_str = _format_duration(int(msg.card_remain_seconds))
+            card_str = _format_duration_hours(int(msg.card_remain_seconds))
             if msg.exchanged_card is not None and msg.exchanged_card > 0:
                 card_str += f" (+{msg.exchanged_card} 天)"
-            lines.append(f"体验天数：{card_str}")
+            lines.append(f"体验时间：{card_str}")
         else:
-            lines.append("体验天数：未知")
+            lines.append("体验时间：未知")
     elif msg.exchange_skipped and not msg.exchange_error:
         lines.append("兑换状态：未配置")
     else:
