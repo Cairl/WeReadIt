@@ -346,6 +346,122 @@ class TestExchangeTokenRefresh:
         assert result.error == ""
 
 
+class TestExchangeReactiveRefresh:
+    """响应式刷新：兑换接口返回 Token 过期时，自动刷新并重试一次。
+
+    区别于补刷保险（proactive，token 年龄 > 90 分钟时兑换前刷），
+    响应式刷新是 reactive：API 明确返回 -2012 后才刷新。
+    场景：/login 重放偶发返回已过期 token（62 秒内失效），补刷保险无法覆盖。
+    """
+
+    @staticmethod
+    def _expired_resp() -> MagicMock:
+        resp = MagicMock()
+        resp.status_code = 401
+        resp.json.return_value = {"errcode": ERRCODE_TOKEN_EXPIRED, "errmsg": "登录超时"}
+        return resp
+
+    @staticmethod
+    def _ok_resp(data: dict | None = None) -> MagicMock:
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = data or {"ok": True}
+        return resp
+
+    def test_query_expired_refresh_retry_succeeds(self, mock_client: MagicMock) -> None:
+        """查询 Token 过期 → 刷新 → 重试查询成功，后续兑换用新 token。"""
+        cfg = _make_cfg()
+        award_data = _mock_award_data()
+        mock_client.post.side_effect = [
+            self._expired_resp(),   # 查询：token 过期
+            self._ok_resp(award_data),  # 查询重试：成功
+            self._ok_resp(),        # 兑换 award 1
+            self._ok_resp(),        # 兑换 award 2
+        ]
+        refresher = MagicMock(
+            return_value=RefreshResult(token="refreshed_token", token_key="accessToken")
+        )
+        result = exchange_awards(mock_client, cfg, refresher=refresher)
+        assert result.exchanged_coin == 2
+        refresher.assert_called_once()
+        # 第 1 次调用（查询）用原 token，刷新后所有后续调用用新 token
+        assert mock_client.post.call_count == 4
+        first_call = mock_client.post.call_args_list[0]
+        assert first_call.kwargs["headers"]["accessToken"] == "test_token"
+        for call in mock_client.post.call_args_list[1:]:
+            assert call.kwargs["headers"]["accessToken"] == "refreshed_token"
+
+    def test_query_expired_refresh_fails_raises(self, mock_client: MagicMock) -> None:
+        """查询 Token 过期 → 刷新失败 → 直接 raise。"""
+        cfg = _make_cfg()
+        mock_client.post.return_value = self._expired_resp()
+        refresher = MagicMock(return_value=RefreshResult(diagnosis="login 凭证失效"))
+        with pytest.raises(ExchangeError) as exc_info:
+            exchange_awards(mock_client, cfg, refresher=refresher)
+        assert exc_info.value.errcode == ERRCODE_TOKEN_EXPIRED
+        refresher.assert_called_once()
+
+    def test_query_expired_retry_also_expired_raises(self, mock_client: MagicMock) -> None:
+        """查询 Token 过期 → 刷新成功 → 重试仍过期 → raise。"""
+        cfg = _make_cfg()
+        mock_client.post.side_effect = [
+            self._expired_resp(),   # 查询：过期
+            self._expired_resp(),   # 查询重试：仍过期
+        ]
+        refresher = MagicMock(
+            return_value=RefreshResult(token="new_but_also_expired", token_key="accessToken")
+        )
+        with pytest.raises(ExchangeError) as exc_info:
+            exchange_awards(mock_client, cfg, refresher=refresher)
+        assert exc_info.value.errcode == ERRCODE_TOKEN_EXPIRED
+
+    def test_exchange_loop_expired_refresh_retry_succeeds(
+        self, mock_client: MagicMock
+    ) -> None:
+        """兑换循环中 Token 过期 → 刷新 → 重试兑换成功。"""
+        cfg = _make_cfg()
+        award_data = _mock_award_data()
+        mock_client.post.side_effect = [
+            self._ok_resp(award_data),    # 查询：成功
+            self._expired_resp(),         # 兑换 award 1：过期
+            self._ok_resp(),              # 兑换 award 1 重试：成功
+            self._ok_resp(),              # 兑换 award 2：成功
+        ]
+        refresher = MagicMock(
+            return_value=RefreshResult(token="refreshed_tok", token_key="accessToken")
+        )
+        result = exchange_awards(mock_client, cfg, refresher=refresher)
+        assert result.exchanged_coin == 2
+        assert result.failed == 0
+        refresher.assert_called_once()
+
+    def test_exchange_loop_expired_retry_also_expired_raises(
+        self, mock_client: MagicMock
+    ) -> None:
+        """兑换循环中 Token 过期 → 刷新 → 重试仍过期 → raise。"""
+        cfg = _make_cfg()
+        award_data = _mock_award_data()
+        mock_client.post.side_effect = [
+            self._ok_resp(award_data),    # 查询：成功
+            self._expired_resp(),         # 兑换 award 1：过期
+            self._expired_resp(),         # 兑换 award 1 重试：仍过期
+        ]
+        refresher = MagicMock(
+            return_value=RefreshResult(token="still_expired", token_key="accessToken")
+        )
+        with pytest.raises(ExchangeError) as exc_info:
+            exchange_awards(mock_client, cfg, refresher=refresher)
+        assert exc_info.value.errcode == ERRCODE_TOKEN_EXPIRED
+
+    def test_no_refresher_expired_raises_immediately(self, mock_client: MagicMock) -> None:
+        """无 refresher 时 Token 过期直接 raise，不尝试刷新。"""
+        cfg = _make_cfg()
+        mock_client.post.return_value = self._expired_resp()
+        with pytest.raises(ExchangeError) as exc_info:
+            exchange_awards(mock_client, cfg)
+        assert exc_info.value.errcode == ERRCODE_TOKEN_EXPIRED
+
+
 class TestExchangeLogging:
     """排查 token 过快过期：验证兑换流程的关键日志输出。
 

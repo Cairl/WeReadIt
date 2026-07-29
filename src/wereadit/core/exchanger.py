@@ -261,6 +261,20 @@ def _pick_number(*vals: object) -> float | None:
     return None
 
 
+def _try_refresh(
+    refresher: Callable[[], RefreshResult] | None,
+) -> str | None:
+    """Token 过期时尝试刷新，成功返回新 token，失败/无 refresher 返回 None。"""
+    if refresher is None:
+        return None
+    result = refresher()
+    if result.ok:
+        logger.info("Token 已重新刷新, 新 token=%s...", result.token[:8])
+        return result.token
+    logger.warning("Token 重新刷新失败: %s", result.diagnosis)
+    return None
+
+
 def query_coin_balance(
     client: HttpClient, cfg: Config
 ) -> tuple[float | None, float | None, int | None]:
@@ -408,14 +422,32 @@ def exchange_awards(
     try:
         award_data = _call_exchange(client, auth_token, vid, cfg.weread_platform, query_body)
     except ExchangeError as exc:
-        if exc.errcode == ERRCODE_TOKEN_EXPIRED:
-            logger.warning(
-                "查询奖励时 Token 已过期 (errcode=%s), token=%s..., 请重新抓包更新 Secret",
-                exc.errcode, token_preview,
-            )
+        if exc.errcode != ERRCODE_TOKEN_EXPIRED:
+            logger.error("查询奖励失败: %s", exc)
+            return ExchangeResult(error=str(exc))
+        # Token 过期：有 refresher 则刷新重试一次，无则直接报错
+        logger.warning(
+            "查询奖励时 Token 已过期 (errcode=%s), token=%s..., 尝试刷新重试...",
+            exc.errcode, token_preview,
+        )
+        new_token = _try_refresh(refresher)
+        if not new_token:
             raise
-        logger.error("查询奖励失败: %s", exc)
-        return ExchangeResult(error=str(exc))
+        auth_token = new_token
+        token_preview = auth_token[:8] if auth_token else ""
+        try:
+            award_data = _call_exchange(
+                client, auth_token, vid, cfg.weread_platform, query_body
+            )
+        except ExchangeError as exc2:
+            if exc2.errcode == ERRCODE_TOKEN_EXPIRED:
+                logger.warning(
+                    "刷新后重试查询仍失败, token=%s..., 请重新抓包更新 Secret",
+                    token_preview,
+                )
+                raise
+            logger.error("查询奖励失败: %s", exc2)
+            return ExchangeResult(error=str(exc2))
 
     reading_time = award_data.get("readingTime", 0)
     reading_day = award_data.get("readingDay", 0)
@@ -459,6 +491,7 @@ def exchange_awards(
 
         # 执行兑换（带指数退避重试）
         success = False
+        _refreshed = False  # 每个奖励限刷一次，避免反复刷过期 token
         for attempt in range(EXCHANGE_MAX_RETRY):
             try:
                 exchange_body = {
@@ -476,6 +509,13 @@ def exchange_awards(
                 break
             except ExchangeError as exc:
                 if exc.errcode == ERRCODE_TOKEN_EXPIRED:
+                    if not _refreshed:
+                        new_token = _try_refresh(refresher)
+                        if new_token:
+                            auth_token = new_token
+                            token_preview = auth_token[:8] if auth_token else ""
+                            _refreshed = True
+                            continue
                     logger.warning(
                         "兑换 %s 时 Token 已过期 (errcode=%s), token=%s..., 请重新抓包更新 Secret",
                         award.award_level_desc, exc.errcode, token_preview,
