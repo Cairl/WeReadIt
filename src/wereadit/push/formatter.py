@@ -17,8 +17,8 @@
     连续阅读：128 天
 
     兑换状态：成功
-    赠币：9.92 (+2)
-    体验卡：1 天 18 小时 40 分钟 (+1 天)
+    赠币数量：9.92 (+2)
+    体验天数：1 天 18 小时 40 分钟 (+1 天)
 
 赠币在兑换之后查询，已含本次兑换所得，与 App「我-账户」顶部书币
 数字一致（含赠币；赠币无独立实时总额接口）。(+N) 为本次兑换所得。
@@ -161,20 +161,20 @@ def format_push_message(msg: PushMessage) -> str:
             balance_str = f"{msg.coin_balance:.2f}"
             if msg.exchanged_coin > 0:
                 balance_str += f" (+{msg.exchanged_coin})"
-            lines.append(f"赠币：{balance_str}")
+            lines.append(f"赠币数量：{balance_str}")
         elif msg.exchanged_coin > 0:
-            lines.append(f"赠币：未知 (+{msg.exchanged_coin})")
+            lines.append(f"赠币数量：未知 (+{msg.exchanged_coin})")
         else:
-            lines.append("赠币：未知")
+            lines.append("赠币数量：未知")
         # 体验卡：剩余时长，格式与「本周阅读」一致（_format_duration）；
         # 未获取显示"未知"；本次兑换获得体验卡时附 (+N 天)
         if msg.card_remain_seconds is not None:
             card_str = _format_duration(int(msg.card_remain_seconds))
             if msg.exchanged_card is not None and msg.exchanged_card > 0:
                 card_str += f" (+{msg.exchanged_card} 天)"
-            lines.append(f"体验卡：{card_str}")
+            lines.append(f"体验天数：{card_str}")
         else:
-            lines.append("体验卡：未知")
+            lines.append("体验天数：未知")
     elif msg.exchange_skipped and not msg.exchange_error:
         lines.append("兑换状态：未配置")
     else:

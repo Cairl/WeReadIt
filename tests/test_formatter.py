@@ -41,9 +41,9 @@ class TestFormatSuccess:
         assert "本周阅读：7 小时 31 分钟" in text
         assert "连续阅读：128 天" in text
         assert "兑换状态：成功" in text
-        assert "赠币：9.92 (+2)" in text
+        assert "赠币数量：9.92 (+2)" in text
         # 体验卡剩余时长带天，括号加数带单位
-        assert "体验卡：1 天 18 小时 40 分钟 (+1 天)" in text
+        assert "体验天数：1 天 18 小时 40 分钟 (+1 天)" in text
         assert "约" not in text
         assert "到期" not in text
         # 不应有旧格式残留
@@ -70,10 +70,10 @@ class TestFormatSuccess:
         assert "本周阅读：1 小时" in text
         assert "兑换状态：成功" in text
         # coin_balance 未设置（未获取到余额）时显示"未知 (+本次获得)"
-        assert "赠币：未知 (+1)" in text
+        assert "赠币数量：未知 (+1)" in text
         assert "0.00" not in text
         # card_remain_seconds 未获取，体验卡显示"未知"
-        assert "体验卡：未知" in text
+        assert "体验天数：未知" in text
         assert "连续阅读" not in text
 
     def test_no_exchange_data_shows_unknown(self) -> None:
@@ -88,8 +88,8 @@ class TestFormatSuccess:
             coin_balance=None,  # 余额也未查到
         )
         text = format_push_message(msg)
-        assert "赠币：未知" in text
-        assert "体验卡：未知" in text
+        assert "赠币数量：未知" in text
+        assert "体验天数：未知" in text
         assert "0.00" not in text
         assert "到期" not in text
 
@@ -106,12 +106,12 @@ class TestFormatSuccess:
             card_remain_seconds=153600,  # 1 天 18 小时 40 分钟
         )
         text = format_push_message(msg)
-        assert "体验卡：1 天 18 小时 40 分钟 (+1 天)" in text
-        assert "体验卡：未知" not in text
+        assert "体验天数：1 天 18 小时 40 分钟 (+1 天)" in text
+        assert "体验天数：未知" not in text
         assert "约" not in text
         assert "到期" not in text
         assert "书币余额" not in text
-        assert "赠币：9.92" in text
+        assert "赠币数量：9.92" in text
 
     def test_minimal_success(self) -> None:
         """阅读成功，兑换跳过（未配置）"""
