@@ -110,7 +110,7 @@ def _probe_balance(cfg: Config) -> tuple[bool, str]:
             if card_secs is not None
             else "未知"
         )
-        report += f"\n[验证] query_coin_balance: 书币余额={coin}, 体验卡={card_str}"
+        report += f"\n[验证] query_coin_balance: 赠币={coin}, 体验卡={card_str}"
     except Exception as exc:  # noqa: BLE001 - 探测失败不影响配置检查主流程
         logger.warning("余额探测异常: %s", exc)
         return True, f"[信息] 余额探测：执行异常 {exc!r}"

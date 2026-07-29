@@ -41,7 +41,7 @@ class TestFormatSuccess:
         assert "本周阅读：7 小时 31 分钟" in text
         assert "连续阅读：128 天" in text
         assert "兑换状态：成功" in text
-        assert "书币余额：9.92 (+2)" in text
+        assert "赠币：9.92 (+2)" in text
         # 体验卡剩余时长带天，括号加数带单位
         assert "体验卡：1 天 18 小时 40 分钟 (+1 天)" in text
         assert "约" not in text
@@ -50,10 +50,9 @@ class TestFormatSuccess:
         assert "执行完成" not in text
         assert "执行失败" not in text
         assert "书币钱包" not in text
-        assert "赠币" not in text
 
     def test_success_without_optional_fields(self) -> None:
-        """余额与体验卡剩余均未获取：书币余额"未知 (+N)"，体验卡"未知"。"""
+        """余额与体验卡剩余均未获取：赠币"未知 (+N)"，体验卡"未知"。"""
         msg = PushMessage(
             account="12345",
             reading_success=True,
@@ -71,14 +70,14 @@ class TestFormatSuccess:
         assert "本周阅读：1 小时" in text
         assert "兑换状态：成功" in text
         # coin_balance 未设置（未获取到余额）时显示"未知 (+本次获得)"
-        assert "书币余额：未知 (+1)" in text
+        assert "赠币：未知 (+1)" in text
         assert "0.00" not in text
         # card_remain_seconds 未获取，体验卡显示"未知"
         assert "体验卡：未知" in text
         assert "连续阅读" not in text
 
     def test_no_exchange_data_shows_unknown(self) -> None:
-        """未发生兑换（exchanged_card=None）：书币余额与体验卡均显示"未知"。"""
+        """未发生兑换（exchanged_card=None）：赠币与体验卡均显示"未知"。"""
         msg = PushMessage(
             account="12345",
             reading_success=True,
@@ -89,7 +88,7 @@ class TestFormatSuccess:
             coin_balance=None,  # 余额也未查到
         )
         text = format_push_message(msg)
-        assert "书币余额：未知" in text
+        assert "赠币：未知" in text
         assert "体验卡：未知" in text
         assert "0.00" not in text
         assert "到期" not in text
@@ -111,7 +110,8 @@ class TestFormatSuccess:
         assert "体验卡：未知" not in text
         assert "约" not in text
         assert "到期" not in text
-        assert "书币余额：9.92" in text
+        assert "书币余额" not in text
+        assert "赠币：9.92" in text
 
     def test_minimal_success(self) -> None:
         """阅读成功，兑换跳过（未配置）"""

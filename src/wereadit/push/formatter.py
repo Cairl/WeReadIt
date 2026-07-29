@@ -17,13 +17,13 @@
     连续阅读：128 天
 
     兑换状态：成功
-    书币余额：9.92 (+2)
+    赠币：9.92 (+2)
     体验卡：1 天 18 小时 40 分钟 (+1 天)
 
-书币余额在兑换之后查询，已含本次兑换所得，与 App「我-账户」顶部书币
+赠币在兑换之后查询，已含本次兑换所得，与 App「我-账户」顶部书币
 数字一致（含赠币；赠币无独立实时总额接口）。(+N) 为本次兑换所得。
 余额未知（接口未返回可识别字段）时只显示本次获得，不兜底为 0.00：
-    书币余额：+2
+    赠币：+2
 
 体验卡显示剩余时长，格式与「本周阅读」一致（_format_duration：
 X 天 Y 小时 Z 分钟）；本次兑换获得体验卡时附 (+N 天)。
@@ -154,18 +154,18 @@ def format_push_message(msg: PushMessage) -> str:
             lines.append("兑换未进行")
     elif msg.exchange_success:
         lines.append("兑换状态：成功")
-        # 书币余额行：有余额时显示"余额 (+本次获得)"；余额未获取时显示"未知"
+        # 赠币行：有余额时显示"余额 (+本次获得)"；余额未获取时显示"未知"
         # （有本次获得则附 (+N)），避免兜底成 0.00 误导用户以为余额是 0。
         # 余额在兑换后查询，已含本次所得，与 App「我-账户」顶部数字对齐。
         if msg.coin_balance is not None:
             balance_str = f"{msg.coin_balance:.2f}"
             if msg.exchanged_coin > 0:
                 balance_str += f" (+{msg.exchanged_coin})"
-            lines.append(f"书币余额：{balance_str}")
+            lines.append(f"赠币：{balance_str}")
         elif msg.exchanged_coin > 0:
-            lines.append(f"书币余额：未知 (+{msg.exchanged_coin})")
+            lines.append(f"赠币：未知 (+{msg.exchanged_coin})")
         else:
-            lines.append("书币余额：未知")
+            lines.append("赠币：未知")
         # 体验卡：剩余时长，格式与「本周阅读」一致（_format_duration）；
         # 未获取显示"未知"；本次兑换获得体验卡时附 (+N 天)
         if msg.card_remain_seconds is not None:
