@@ -46,6 +46,12 @@ def _run(cfg: Config, refresh_result: RefreshResult | None = None):
             "wereadit.core.token_refresher.refresh_app_token",
             return_value=refresh_result,
         ),
+        # 余额探测为真实网络请求，测试中 mock 掉，避免 refresh_cookie
+        # 多轮退避 sleep 卡死测试套件
+        patch(
+            "wereadit.core.balance_probe.probe_balance_sources",
+            return_value="余额来源探测（mock）",
+        ),
     ):
         exit_code = main()
     return exit_code, mock_push
