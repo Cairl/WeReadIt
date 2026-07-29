@@ -191,12 +191,11 @@ class TestExchangeAwards:
         assert "skey" in kwargs["headers"]
         assert "accessToken" not in kwargs["headers"]
 
-    def test_keep_reading_days_and_coin_balance_extracted(self, mock_client: MagicMock) -> None:
-        """响应中的连续阅读天数与书币余额应被提取到 ExchangeResult。"""
+    def test_keep_reading_days_extracted(self, mock_client: MagicMock) -> None:
+        """响应中的连续阅读天数应被提取到 ExchangeResult。"""
         cfg = _make_cfg()
         query_resp = _mock_award_data()
         query_resp["keepReadingDays"] = 128
-        query_resp["bookCoin"] = 9.92
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = query_resp
@@ -204,45 +203,9 @@ class TestExchangeAwards:
 
         result = exchange_awards(mock_client, cfg)
         assert result.keep_reading_days == 128
-        assert result.coin_balance == 9.92
-
-    def test_coin_balance_zero_extracted(self, mock_client: MagicMock) -> None:
-        """书币余额为 0 时应返回 0.0（而非 None），确保推送能展示当前书币。"""
-        cfg = _make_cfg()
-        query_resp = _mock_award_data()
-        query_resp["bookCoin"] = 0
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = query_resp
-        mock_client.post.return_value = mock_response
-
-        result = exchange_awards(mock_client, cfg)
-        assert result.coin_balance == 0.0
-
-    def test_coin_balance_prefers_nonzero_over_zero_field(
-        self, mock_client: MagicMock
-    ) -> None:
-        """响应中同时存在 0 值字段（如"本次获得"）与非零余额字段时，应返回非零余额。
-
-        回归 2026-07-28 推送显示"赠币：0.00 (+2)"而真实余额 23.92 的问题：
-        原实现按字段名顺序取首个 >= 0 的值即返回，命中 0 值字段就错过真实余额。
-        """
-        cfg = _make_cfg()
-        query_resp = _mock_award_data()
-        query_resp["bookCoin"] = 0  # 同义字段误匹配（如"本次获得书币数"）
-        query_resp["bookCoinBalance"] = 23.92  # 真实钱包余额
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = query_resp
-        mock_client.post.return_value = mock_response
-
-        result = exchange_awards(mock_client, cfg)
-        # 查询接口不再提取余额（由 query_coin_balance 独立查询），兑换响应同查询
-        # 响应（mock 固定返回），兑换时 _extract_coin_balance 偏好非零 → 23.92
-        assert result.coin_balance == 23.92
 
     def test_optional_fields_none_when_absent(self, mock_client: MagicMock) -> None:
-        """响应中无连续阅读/书币字段时，对应字段为 None。"""
+        """响应中无连续阅读字段时，对应字段为 None。"""
         cfg = _make_cfg()
         query_resp = _mock_award_data()
         mock_response = MagicMock()
@@ -252,7 +215,6 @@ class TestExchangeAwards:
 
         result = exchange_awards(mock_client, cfg)
         assert result.keep_reading_days is None
-        assert result.coin_balance is None
 
     def test_no_awards_logs_no_exchange_message(
         self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
@@ -446,78 +408,102 @@ class TestExchangeLogging:
 
 
 class TestQueryCoinBalance:
-    """独立查询：POST /web/pay/balance，返回 (coin_balance, card_balance)。
+    """独立查询：POST /web/pay/balance + GET /web/pay/memberCardSummary。
 
-    书币按平台取 giftBalance/peerBalance；体验卡剩余天数取 welfare.expiredTime
-    （秒）转 int(秒 // 86400) 天。
+    返回 (coin_balance, card_remain_seconds, card_expire_ts)。
+    字段语义经 2026-07-30 真实账号探测确认（见 exchanger.query_coin_balance
+    docstring）；本组测试只验证提取/兜底/容错逻辑，mock 值均为中性任意数，
+    不与任何真实账号数值挂钩。
     """
 
-    def test_ios_picks_gift_balance(self, mock_client: MagicMock) -> None:
-        """iOS 平台优先取 giftBalance；无 welfare 时 card_balance 为 None。"""
-        cfg = _make_cfg(app_token="ios_token", app_token_key="skey")
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"giftBalance": 23.92, "peerBalance": 0}
-        mock_client.post.return_value = mock_resp
+    @staticmethod
+    def _setup(mock_client: MagicMock, balance_json: dict, card_json: dict) -> None:
+        """配置 mock：post → /web/pay/balance，get → memberCardSummary。"""
+        balance_resp = MagicMock()
+        balance_resp.status_code = 200
+        balance_resp.json.return_value = balance_json
+        mock_client.post.return_value = balance_resp
+        card_resp = MagicMock()
+        card_resp.status_code = 200
+        card_resp.json.return_value = card_json
+        mock_client.get.return_value = card_resp
 
-        coin, card = query_coin_balance(mock_client, cfg)
-        assert coin == 23.92
-        assert card is None
+    def test_ios_picks_gift_balance(self, mock_client: MagicMock) -> None:
+        """iOS 平台优先取 giftBalance（本端余额）。"""
+        cfg = _make_cfg(app_token="ios_token", app_token_key="skey")
+        self._setup(
+            mock_client,
+            {"giftBalance": 12.5, "balance": 12.5, "peerBalance": 7.0},
+            {"errCode": -2012},  # 体验卡接口失败
+        )
+        coin, card_secs, card_ts = query_coin_balance(mock_client, cfg)
+        assert coin == 12.5
+        assert card_secs is None
+        assert card_ts is None
 
     def test_android_picks_peer_balance(self, mock_client: MagicMock) -> None:
         """Android 平台优先取 peerBalance。"""
         cfg = _make_cfg()  # app_token_key="accessToken" -> Android
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"giftBalance": 0, "peerBalance": 15.5}
-        mock_client.post.return_value = mock_resp
+        self._setup(
+            mock_client,
+            {"giftBalance": 12.5, "peerBalance": 7.25},
+            {"errCode": -2012},
+        )
+        coin, _, _ = query_coin_balance(mock_client, cfg)
+        assert coin == 7.25
 
-        coin, card = query_coin_balance(mock_client, cfg)
-        assert coin == 15.5
-
-    def test_ios_fallback_to_peer_when_gift_zero(self, mock_client: MagicMock) -> None:
-        """iOS giftBalance 为 0 时回退 peerBalance 非零值。"""
+    def test_coin_fallback_to_balance_field(self, mock_client: MagicMock) -> None:
+        """giftBalance 缺失时回退 balance 字段。"""
         cfg = _make_cfg(app_token="ios_token", app_token_key="skey")
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"giftBalance": 0, "peerBalance": 10.0}
-        mock_client.post.return_value = mock_resp
+        self._setup(mock_client, {"balance": 3.5}, {"errCode": -2012})
+        coin, _, _ = query_coin_balance(mock_client, cfg)
+        assert coin == 3.5
 
-        coin, _ = query_coin_balance(mock_client, cfg)
-        assert coin == 10.0
-
-    def test_card_balance_from_welfare_expired_time(self, mock_client: MagicMock) -> None:
-        """welfare.expiredTime（秒）转体验卡剩余天数（向下取整）。"""
+    def test_errcode_camel_case_returns_none(self, mock_client: MagicMock) -> None:
+        """响应含大写驼峰 errCode（非 0）时判失败返回 None（回归：旧实现只查
+        小写 errcode，会把 -2012 错误响应当成功放行）。"""
         cfg = _make_cfg()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "giftBalance": 10.0,
-            "welfare": {"expiredTime": 3 * 86400 + 3600},  # 3 天 1 小时 → 3 天
-        }
-        mock_client.post.return_value = mock_resp
-
-        coin, card = query_coin_balance(mock_client, cfg)
-        assert coin == 10.0
-        assert card == 3
-
-    def test_failure_errcode_returns_none(self, mock_client: MagicMock) -> None:
-        """响应含 errcode（非 0）时返回 (None, None)。"""
-        cfg = _make_cfg()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"errcode": -1, "errmsg": "need login"}
-        mock_client.post.return_value = mock_resp
-
-        coin, card = query_coin_balance(mock_client, cfg)
+        self._setup(mock_client, {"errCode": -2012, "errMsg": "登录超时"}, {})
+        coin, card_secs, card_ts = query_coin_balance(mock_client, cfg)
         assert coin is None
-        assert card is None
+        assert card_secs is None
+        assert card_ts is None
 
     def test_network_exception_returns_none(self, mock_client: MagicMock) -> None:
-        """请求异常时返回 (None, None)，不影响主流程。"""
+        """请求异常时全部返回 None，不影响主流程。"""
         cfg = _make_cfg()
         mock_client.post.side_effect = Exception("network error")
-
-        coin, card = query_coin_balance(mock_client, cfg)
+        mock_client.get.side_effect = Exception("network error")
+        coin, card_secs, card_ts = query_coin_balance(mock_client, cfg)
         assert coin is None
-        assert card is None
+        assert card_secs is None
+        assert card_ts is None
+
+    def test_card_from_member_card_summary(self, mock_client: MagicMock) -> None:
+        """体验卡优先取 memberCardSummary 的 remainTime（秒）与 expiredTime。"""
+        cfg = _make_cfg()
+        self._setup(
+            mock_client,
+            {"giftBalance": 12.5, "welfare": {"expiredTime": 3600}},
+            {"remainTime": 9600, "expiredTime": 1785000000},
+        )
+        coin, card_secs, card_ts = query_coin_balance(mock_client, cfg)
+        assert coin == 12.5
+        assert card_secs == 9600.0
+        assert card_ts == 1785000000
+
+    def test_card_fallback_to_welfare(self, mock_client: MagicMock) -> None:
+        """memberCardSummary 失败时回退 /web/pay/balance 的 welfare 字段。"""
+        cfg = _make_cfg()
+        self._setup(
+            mock_client,
+            {
+                "giftBalance": 12.5,
+                "welfare": {"expiredTime": 5400, "showExpiredTime": 1785000001},
+            },
+            {"errCode": -2012},
+        )
+        coin, card_secs, card_ts = query_coin_balance(mock_client, cfg)
+        assert coin == 12.5
+        assert card_secs == 5400.0
+        assert card_ts == 1785000001

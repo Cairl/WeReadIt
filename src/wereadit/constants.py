@@ -13,11 +13,18 @@ FIX_SYNCKEY_URL = "https://weread.qq.com/web/book/chapterInfos"
 # 兑换接口
 EXCHANGE_URL = "https://i.weread.qq.com/weekly/exchange"
 
-# 余额查询接口（独立于兑换，无论是否兑换都查询当前赠币/书币余额）
-# /exchange 查询接口实测不返回钱包余额，需独立调用。
-# web 端 /web/pay/balance（POST，web cookie 认证），响应 giftBalance（iOS 书币）
-# / peerBalance（Android 书币）。参考 wechat-reader-ext 项目 Me.vue。
+# 余额查询接口（独立于兑换，无论是否兑换都查询当前书币余额）
+# /exchange 查询与兑换响应均不含钱包余额（2026-07-30 实测拍平确认），需独立调用。
+# web 端 /web/pay/balance（POST，web cookie 认证）：balance / giftBalance 为
+# 本端（iOS）书币余额（含赠币，与 App「我-账户」顶部数字一致），peerBalance /
+# peerGiftBalance 为对端（Android）；welfare.expiredTime 为体验卡剩余秒数。
+# 注意：该接口错误字段是大写驼峰 errCode（非 errcode），失败时 HTTP 200 + errCode=-2012。
 BALANCE_URL = "https://weread.qq.com/web/pay/balance"
+
+# 体验卡（无限卡）查询接口（GET，web cookie 认证，pf 参数标识平台）
+# remainTime = 体验卡剩余秒数（与 /web/pay/balance 的 welfare.expiredTime 同值），
+# expiredTime = 到期时间戳。体验卡信息以此接口为准。
+MEMBER_CARD_SUMMARY_URL = "https://weread.qq.com/web/pay/memberCardSummary"
 
 # App 端 /login 接口超时（用于刷新 skey/accessToken，实现兑换 Token 自动续期）
 LOGIN_TIMEOUT = 15

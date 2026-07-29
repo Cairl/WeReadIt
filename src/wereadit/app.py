@@ -104,15 +104,6 @@ def main() -> int:
         msg.reading_success = True
         msg.read_minutes = result.total_minutes
 
-        # 查询当前余额（独立于兑换，无论是否兑换都显示）
-        from wereadit.core.exchanger import query_coin_balance
-
-        coin_balance, card_balance = query_coin_balance(client, cfg)
-        if coin_balance is not None:
-            msg.coin_balance = coin_balance
-        if card_balance is not None:
-            msg.card_balance = card_balance
-
         # 兑换阅读奖励
         if cfg.weread_access_token:
             logger.info("开始兑换阅读奖励...")
@@ -129,9 +120,6 @@ def main() -> int:
                 msg.exchanged_coin = exchange_result.exchanged_coin
                 msg.exchanged_card = exchange_result.exchanged_card
                 msg.keep_reading_days = exchange_result.keep_reading_days
-                # 兑换响应余额仅作补充：独立余额查询失败时才用兑换响应的
-                if msg.coin_balance is None and exchange_result.coin_balance is not None:
-                    msg.coin_balance = exchange_result.coin_balance
                 msg.exchange_success = True
                 if exchange_result.error:
                     msg.exchange_error = exchange_result.error
@@ -171,6 +159,19 @@ def main() -> int:
             if refresh_diagnosis:
                 exit_code = 1
                 msg.exchange_error = refresh_diagnosis
+
+        # 兑换之后查询书币余额与体验卡：余额含本次兑换所得，与 App「我-账户」
+        # 顶部书币数字对齐（2026-07-30 实证：兑换前查询会比 App 滞后一次兑换，
+        # 导致推送数值看起来"不动"）。无论兑换成败都查询。
+        from wereadit.core.exchanger import query_coin_balance
+
+        coin_balance, card_seconds, card_expire_ts = query_coin_balance(client, cfg)
+        if coin_balance is not None:
+            msg.coin_balance = coin_balance
+        if card_seconds is not None:
+            msg.card_remain_seconds = card_seconds
+        if card_expire_ts is not None:
+            msg.card_expire_ts = card_expire_ts
 
         msg.platform_note = platform_note
 

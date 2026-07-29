@@ -44,6 +44,7 @@ from wereadit.constants import (
     IOS_PF,
     IOS_UA,
     IOS_V,
+    MEMBER_CARD_SUMMARY_URL,
     PLATFORM_IOS,
     TOKEN_MAX_AGE_SECONDS,
 )
@@ -60,42 +61,6 @@ _KEEP_READING_KEYS = (
     "totalReadDay",
     "totalReadDays",
 )
-# 响应中可能表示"书币钱包余额"的字段名（按优先级尝试）
-# 不放 "coin" / "balance" 这类过于通用的名字，避免误匹配"本次获得数"等字段
-# 2026-07-29: 追加赠币（presentCoin / giftCoin / freeCoin）系列字段。
-# 微信读书"书币"与"赠币"可能分属不同字段，原列表只覆盖 bookCoin 系，
-# 导致用户真实赠币余额（如 23.92）所在字段未被识别，推送显示"赠币：0"。
-_COIN_BALANCE_KEYS = (
-    "bookCoin",
-    "bookCoinBalance",
-    "bookCoinNum",
-    "walletCoin",
-    "walletCoinBalance",
-    "userCoin",
-    "userCoinBalance",
-    "coinBalance",
-    "remainCoin",
-    "totalCoin",
-    # 赠币体系
-    "presentCoin",
-    "presentCoinBalance",
-    "presentCoinNum",
-    "giftCoin",
-    "giftCoinBalance",
-    "freeCoin",
-    "freeCoinBalance",
-)
-# 余额字段可能嵌套在这些子对象里（递归查找，深度限 3 层）
-_COIN_BALANCE_CONTAINERS = (
-    "wallet",
-    "user",
-    "account",
-    "userInfo",
-    "walletInfo",
-    "userWallet",
-    "coinInfo",
-    "bookCoinInfo",
-)
 
 
 @dataclass
@@ -103,8 +68,8 @@ class ExchangeResult:
     """兑换结果（结构化）。
 
     成功时 error 为空；失败时 error 非空，其余字段为零值。
-    可选字段（keep_reading_days / coin_balance）由响应决定是否有值，
-    无值时为 None，formatter 会自动跳过对应行。
+    可选字段 keep_reading_days 由响应决定是否有值，无值时为 None，
+    formatter 会自动跳过对应行。
     """
 
     reading_time: int = 0  # 本周阅读时长（秒）
@@ -115,7 +80,6 @@ class ExchangeResult:
     failed: int = 0  # 兑换失败的奖励数
     platform: str = ""  # 平台标识（iOS / Android）
     keep_reading_days: int | None = None  # 连续阅读天数（可选）
-    coin_balance: float | None = None  # 书币钱包余额（可选）
     error: str = ""  # 兑换错误描述（非空表示兑换失败）
 
 
@@ -222,9 +186,9 @@ def _collect_all_numeric_fields(
 ) -> dict[str, Any]:
     """递归收集响应中所有数值字段，键为点分路径（如 'wallet.bookCoin'）。
 
-    诊断用途：当 _extract_coin_balance 返回 None 时，用 WARNING 输出全部数值字段，
-    让用户在默认 INFO 日志下即可定位真实余额字段名（如 23.92 对应哪个字段），
-    不必开 DEBUG。深度限 3 层，与余额提取的递归深度一致。
+    诊断用途：接口响应不符合预期时，用 WARNING 输出全部数值字段，
+    让用户在默认 INFO 日志下即可定位问题（如字段改名/结构变化），
+    不必开 DEBUG。深度限 3 层。
     """
     if depth > 3:
         return {}
@@ -238,149 +202,147 @@ def _collect_all_numeric_fields(
     return result
 
 
-def _collect_coin_balance_candidates(
-    award_data: dict[str, Any], depth: int = 0
-) -> list[float]:
-    """递归收集所有疑似书币余额字段的值。
+def _fetch_json(
+    client: HttpClient,
+    method: str,
+    url: str,
+    name: str,
+    *,
+    json_body: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """发请求并返回 JSON dict；任何失败都记 WARNING 并返回 None。
 
-    返回当前层 + 嵌套容器层中所有匹配 _COIN_BALANCE_KEYS 且为非负数值的字段值，
-    顺序为：当前层候选 -> 各嵌套容器候选（深度优先）。
+    失败判定：网络异常 / 非 200 / 响应非 JSON / errcode 或 errCode 非 0。
+    注意 weread 部分接口（如 /web/pay/balance）错误字段是大写驼峰 errCode，
+    只查 errcode 会把错误响应当成功响应放行（2026-07-30 实证）。
     """
-    if depth > 3:
-        return []
-    found: list[float] = []
-    for key in _COIN_BALANCE_KEYS:
-        value = award_data.get(key)
-        if (
-            isinstance(value, int | float)
-            and not isinstance(value, bool)
-            and value >= 0
-        ):
-            found.append(float(value))
-    for container_key in _COIN_BALANCE_CONTAINERS:
-        container = award_data.get(container_key)
-        if isinstance(container, dict):
-            found.extend(_collect_coin_balance_candidates(container, depth + 1))
-    return found
-
-
-def _extract_coin_balance(
-    award_data: dict[str, Any], depth: int = 0
-) -> float | None:
-    """从容错字段名列表中提取书币钱包余额，支持递归查找嵌套对象，未找到返回 None。
-
-    微信读书书币余额可能以整数（书币数）或小数（元）形式返回，统一转 float。
-
-    选择策略：收集所有候选值，优先返回非零值；全部候选为 0 时返回 0.0；
-    无任何候选字段返回 None。
-
-    偏好非零值的原因：响应中可能同时存在"本次获得书币数"（值常为 0 或 2）
-    与"钱包余额"两个同义字段，按固定顺序取首个会把 0 误当余额，导致推送显示
-    "赠币：0.00"误导用户以为余额清零。优先非零值能避开"本次获得=0"冒充余额的
-    情况；余额确为 0 时仍返回 0.0，不影响展示。
-
-    递归深度限制 3 层：余额字段可能嵌套在 wallet/user/account 等子对象里，
-    但过深遍历既无必要也容易误匹配。
-    """
-    candidates = _collect_coin_balance_candidates(award_data, depth)
-    if not candidates:
-        return None
-    for value in candidates:
-        if value > 0:
-            return value
-    return 0.0
-
-
-def query_coin_balance(
-    client: HttpClient, cfg: Config
-) -> tuple[float | None, int | None]:
-    """独立查询当前书币/赠币余额与体验卡剩余天数（不依赖兑换）。
-
-    /exchange 查询接口（isExchangeAward=0）实测不返回钱包余额，兑换响应只在
-    兑换时才有。本函数调用 web 端 /web/pay/balance（POST，web cookie 认证）
-    独立查询，确保无论是否发生兑换都能在推送中显示当前余额与体验卡剩余。
-
-    响应字段（参考 wechat-reader-ext 项目 Me.vue）：giftBalance（iOS 书币）、
-    peerBalance（Android 书币）、welfare.expiredTime（体验卡/无限卡剩余秒数，
-    转 int(秒 // 86400) 天）。书币按当前平台优先取，另一平台兜底。
-
-    Args:
-        client: HTTP 客户端（自带 web cookie，web 端接口认证用）
-        cfg: 运行时配置（取 weread_platform 决定优先字段）
-
-    Returns:
-        (coin_balance, card_balance)：余额（float）与体验卡剩余天数（int）；
-        查询失败或未识别到对应字段为 None
-    """
-    body = {"zoneid": "1", "release": "1", "pf": "weread_wx-2001-iap-2001-iphone"}
     try:
-        resp = client.post(BALANCE_URL, json=body, timeout=EXCHANGE_TIMEOUT)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("余额查询请求异常: %s", exc)
-        return None, None
+        if method == "POST":
+            resp = client.post(url, json=json_body, timeout=EXCHANGE_TIMEOUT)
+        else:
+            resp = client.get(url, timeout=EXCHANGE_TIMEOUT)
+    except Exception as exc:  # noqa: BLE001 - 查询失败不应影响主流程
+        logger.warning("%s请求异常: %s", name, exc)
+        return None
 
     try:
         data = resp.json()
     except ValueError:
         logger.warning(
-            "余额查询响应非 JSON: HTTP=%s, 原文=%s", resp.status_code, resp.text[:500]
+            "%s响应非 JSON: HTTP=%s, 原文=%s", name, resp.status_code, resp.text[:500]
         )
-        return None, None
-
-    if resp.status_code != 200 or (
-        isinstance(data, dict) and data.get("errcode") not in (None, 0)
-    ):
-        logger.warning(
-            "余额查询失败: HTTP=%s, 响应=%s",
-            resp.status_code,
-            str(data)[:500],
-        )
-        return None, None
-
-    # 余额字段可能在顶层或 data 子对象
-    inner = data.get("data", data) if isinstance(data, dict) else data
-    if not isinstance(inner, dict):
-        inner = data if isinstance(data, dict) else {}
-
-    gift = inner.get("giftBalance")
-    peer = inner.get("peerBalance")
-
-    def _pick(*vals: object) -> float | None:
-        # 优先非零值，其次 0 值，都无效返回 None
-        for v in vals:
-            if isinstance(v, int | float) and not isinstance(v, bool) and v > 0:
-                return float(v)
-        for v in vals:
-            if isinstance(v, int | float) and not isinstance(v, bool) and v >= 0:
-                return float(v)
         return None
 
-    # 按当前平台优先，另一平台兜底
-    if cfg.weread_platform == PLATFORM_IOS:
-        balance = _pick(gift, peer)
-    else:
-        balance = _pick(peer, gift)
+    if not isinstance(data, dict):
+        logger.warning("%s响应非对象: HTTP=%s, 原文=%s", name, resp.status_code, resp.text[:500])
+        return None
 
-    # 体验卡（无限卡）剩余天数：welfare.expiredTime 是秒数，转天
-    card_balance: int | None = None
-    welfare = inner.get("welfare") if isinstance(inner, dict) else None
-    if isinstance(welfare, dict):
-        expired_time = welfare.get("expiredTime")
-        if isinstance(expired_time, int | float) and not isinstance(expired_time, bool):
-            card_balance = int(expired_time // 86400)
-
-    all_numeric = _collect_all_numeric_fields(inner)
-    if balance is None:
+    errcode = data.get("errcode", data.get("errCode"))
+    if resp.status_code != 200 or errcode not in (None, 0):
         logger.warning(
-            "余额查询响应未识别到余额字段。HTTP=%s, 响应原文=%s, 数值字段=%s。"
-            "请据此判断接口是否正确或反馈真实字段",
+            "%s失败: HTTP=%s, errcode=%s, 数值字段=%s",
+            name,
             resp.status_code,
-            resp.text[:500],
-            all_numeric,
+            errcode,
+            _collect_all_numeric_fields(data),
         )
-    else:
-        logger.debug("余额查询响应数值字段: %s", all_numeric)
-    return balance, card_balance
+        return None
+    return data
+
+
+def _pick_number(*vals: object) -> float | None:
+    """优先取非零数值，其次 0 值，都无效返回 None。"""
+    for v in vals:
+        if isinstance(v, int | float) and not isinstance(v, bool) and v > 0:
+            return float(v)
+    for v in vals:
+        if isinstance(v, int | float) and not isinstance(v, bool) and v >= 0:
+            return float(v)
+    return None
+
+
+def query_coin_balance(
+    client: HttpClient, cfg: Config
+) -> tuple[float | None, float | None, int | None]:
+    """独立查询书币余额与体验卡剩余（不依赖兑换）。
+
+    2026-07-30 实证结论（config-check 余额探测对真实账号全量字段拍平，
+    并经 consumeHistory 交易记录交叉核对金额变动）：
+
+    - /web/pay/balance（POST，web cookie 认证）：
+      balance / giftBalance = 本端（iOS）书币钱包余额（含赠币，与 App
+      「我-账户」顶部书币数字一致，随兑换/消费实时变动）；
+      peerBalance / peerGiftBalance = 对端（Android）余额 / 赠币；
+      welfare.expiredTime = 体验卡剩余秒数；
+      welfare.showExpiredTime = 体验卡到期时间戳。
+    - /web/pay/memberCardSummary（GET）：remainTime = 体验卡剩余秒数
+      （与 welfare.expiredTime 同值），expiredTime = 到期时间戳。
+      体验卡以此接口为准，welfare 字段作兜底。
+    - 赠币没有独立的实时总额接口：/pay/consumeHistory 每条记录的 gift
+      字段才是赠币拆分（按条标注 expiringTime），推送只能展示含赠币的
+      书币余额。
+    - /weekly/exchange 查询与兑换响应均不含余额字段（实测拍平确认），
+      余额只能由此处独立查询获得。
+
+    Returns:
+        (coin_balance, card_remain_seconds, card_expire_ts)：
+        书币余额 / 体验卡剩余秒数 / 体验卡到期时间戳；获取失败的项为 None
+    """
+    # ---- 书币余额（/web/pay/balance 是唯一来源）----
+    coin_balance: float | None = None
+    welfare_seconds: float | None = None
+    welfare_expire_ts: int | None = None
+    balance_data = _fetch_json(
+        client,
+        "POST",
+        BALANCE_URL,
+        "书币余额查询",
+        json_body={"zoneid": "1", "release": "1", "pf": "weread_wx-2001-iap-2001-iphone"},
+    )
+    if balance_data is not None:
+        gift = balance_data.get("giftBalance")
+        total = balance_data.get("balance")
+        peer = balance_data.get("peerBalance")
+        if cfg.weread_platform == PLATFORM_IOS:
+            coin_balance = _pick_number(gift, total, peer)
+        else:
+            coin_balance = _pick_number(peer, total, gift)
+        if coin_balance is None:
+            logger.warning(
+                "书币余额查询响应未识别到余额字段，数值字段=%s",
+                _collect_all_numeric_fields(balance_data),
+            )
+        # 体验卡兜底字段（memberCardSummary 失败时用）
+        welfare = balance_data.get("welfare")
+        if isinstance(welfare, dict):
+            w_time = welfare.get("expiredTime")
+            if isinstance(w_time, int | float) and not isinstance(w_time, bool):
+                welfare_seconds = float(w_time)
+            w_expire = welfare.get("showExpiredTime")
+            if isinstance(w_expire, int | float) and not isinstance(w_expire, bool):
+                welfare_expire_ts = int(w_expire)
+
+    # ---- 体验卡（memberCardSummary 为准，welfare 兜底）----
+    card_seconds: float | None = None
+    card_expire_ts: int | None = None
+    pf = "ios" if cfg.weread_platform == PLATFORM_IOS else "android"
+    card_data = _fetch_json(
+        client, "GET", f"{MEMBER_CARD_SUMMARY_URL}?pf={pf}", "体验卡查询"
+    )
+    if card_data is not None:
+        remain = card_data.get("remainTime")
+        if isinstance(remain, int | float) and not isinstance(remain, bool):
+            card_seconds = float(remain)
+        expire = card_data.get("expiredTime")
+        if isinstance(expire, int | float) and not isinstance(expire, bool):
+            card_expire_ts = int(expire)
+
+    if card_seconds is None:
+        card_seconds = welfare_seconds
+    if card_expire_ts is None:
+        card_expire_ts = welfare_expire_ts
+
+    return coin_balance, card_seconds, card_expire_ts
 
 
 def exchange_awards(
@@ -458,11 +420,6 @@ def exchange_awards(
     reading_time = award_data.get("readingTime", 0)
     reading_day = award_data.get("readingDay", 0)
     keep_reading_days = _extract_keep_reading_days(award_data)
-    # 余额由独立的 query_coin_balance（/web/pay/balance）查询；/exchange 查询接口
-    # 实测不返回钱包余额（响应全是 readingTime/readingDay 等阅读统计字段），
-    # 此处不再提取，避免每次运行输出误导性 WARNING。兑换响应若带余额仍会在
-    # 兑换循环中覆盖 coin_balance（作为独立查询失败时的兜底）。
-    coin_balance: float | None = None
     raw_awards = award_data.get("readtimeAwards", []) + award_data.get("readdayAwards", [])
     awards = [Award.from_dict(a) for a in raw_awards]
 
@@ -472,7 +429,6 @@ def exchange_awards(
     exchanged_coin = 0
     skipped = 0
     failed = 0
-    last_exchange_resp: dict[str, Any] | None = None  # 诊断用：最后一次成功兑换响应
 
     for award in awards:
         if award.award_status != 1:
@@ -513,19 +469,10 @@ def exchange_awards(
                     "pf": _get_pf(cfg.weread_platform),
                     "awardChoiceType": choice_type,
                 }
-                exchange_resp = _call_exchange(
+                _call_exchange(
                     client, auth_token, vid, cfg.weread_platform, exchange_body
                 )
                 success = True
-                last_exchange_resp = exchange_resp  # 记录最后一次兑换响应用于诊断
-                # 兑换响应可能带余额，提取到则覆盖（查询接口不返回余额，coin_balance
-                # 初始 None）。作为独立 query_coin_balance 失败时的兜底。
-                new_balance = _extract_coin_balance(exchange_resp)
-                if new_balance is not None:
-                    coin_balance = new_balance
-                    logger.debug(
-                        "兑换响应识别到最新书币余额: %s", new_balance
-                    )
                 break
             except ExchangeError as exc:
                 if exc.errcode == ERRCODE_TOKEN_EXPIRED:
@@ -567,19 +514,6 @@ def exchange_awards(
             logger.error("兑换 %s 失败（重试 %d 次）", award.award_level_desc, EXCHANGE_MAX_RETRY)
             failed += 1
 
-    # 兑换响应诊断：查询接口（isExchangeAward=0）实测不返回钱包余额（响应全是
-    # readingTime/readingDay 等阅读统计字段），余额可能只在兑换响应
-    # （isExchangeAward=1）里返回。若最终未识别到正数余额且发生过兑换，WARNING
-    # 输出最后一次兑换响应的全部数值字段，供定位真实余额字段名补进 _COIN_BALANCE_KEYS。
-    if (coin_balance is None or coin_balance == 0.0) and last_exchange_resp is not None:
-        _ex_numeric = _collect_all_numeric_fields(last_exchange_resp)
-        logger.warning(
-            "查询接口未返回余额字段，兑换响应也未识别到正数书币余额。"
-            "最后一次兑换响应数值字段: %s。"
-            "请从中找到真实余额字段并反馈补进 _COIN_BALANCE_KEYS",
-            _ex_numeric,
-        )
-
     # 无可兑换奖励：查询成功但无实际兑换（awards 为空或全部被策略/状态跳过），
     # 追加状态回显，避免"开始兑换阅读奖励..."之后无任何后续日志
     if exchanged_coin == 0 and exchanged_card == 0 and failed == 0:
@@ -594,5 +528,4 @@ def exchange_awards(
         failed=failed,
         platform=platform_name,
         keep_reading_days=keep_reading_days,
-        coin_balance=coin_balance,
     )
