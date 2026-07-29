@@ -180,6 +180,14 @@ def probe_balance_sources(
             f"https://weread.qq.com/web/user?userVid={vid}",
         )
     )
+    lines.extend(
+        _probe_one(
+            client,
+            "web/pay/consumeHistory",
+            "GET",
+            "https://weread.qq.com/web/pay/consumeHistory?pf=ios&start=0&count=3",
+        )
+    )
 
     # ---- App 端（/login 重放的新鲜 token + 完整平台请求头）----
     if app_token and platform:
@@ -219,6 +227,15 @@ def probe_balance_sources(
                 "i/user/profile",
                 "GET",
                 "https://i.weread.qq.com/user/profile",
+                headers=app_headers,
+            )
+        )
+        lines.extend(
+            _probe_one(
+                client,
+                "i/pay/consumeHistory",
+                "GET",
+                "https://i.weread.qq.com/pay/consumeHistory?start=0&count=3",
                 headers=app_headers,
             )
         )
